@@ -1,0 +1,162 @@
+# configtx.yaml
+# Defines the PatientChain consortium and the "patientchainchannel" that
+# HospitalA and HospitalB transact on, using Raft ordering (Section 3.4:
+# "Raft-based ordering... runs on modest hardware").
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: crypto-config/ordererOrganizations/patientchain.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+
+  - &HospitalA
+    Name: HospitalAMSP
+    ID: HospitalAMSP
+    MSPDir: crypto-config/peerOrganizations/hospitala.patientchain.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('HospitalAMSP.admin', 'HospitalAMSP.peer', 'HospitalAMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('HospitalAMSP.admin', 'HospitalAMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('HospitalAMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('HospitalAMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.hospitala.patientchain.local
+        Port: 7051
+
+  - &HospitalB
+    Name: HospitalBMSP
+    ID: HospitalBMSP
+    MSPDir: crypto-config/peerOrganizations/hospitalb.patientchain.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('HospitalBMSP.admin', 'HospitalBMSP.peer', 'HospitalBMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('HospitalBMSP.admin', 'HospitalBMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('HospitalBMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('HospitalBMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.hospitalb.patientchain.local
+        Port: 9051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.patientchain.local
+        Port: 7050
+        ClientTLSCert: crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls/server.crt
+        ServerTLSCert: crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls/server.crt
+  Addresses:
+    - orderer.patientchain.local:7050
+  BatchTimeout: 2s
+  # b in Section 3.5.2's cost model: raising MaxMessageCount trades higher
+  # per-block latency for a lower amortised Co/b overhead per transaction.
+  BatchSize:
+    MaxMessageCount: 100
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 2 MB
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  PatientChainGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Consortiums:
+      PatientChainConsortium:
+        Organizations:
+          - *HospitalA
+          - *HospitalB
+
+  PatientChainChannel:
+    <<: *ChannelDefaults
+    Consortium: PatientChainConsortium
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *HospitalA
+        - *HospitalB
+      Capabilities:
+        <<: *ApplicationCapabilities

@@ -1,0 +1,151 @@
+version: "3.7"
+
+# PatientChain pilot network: one orderer, one peer per hospital.
+# Deliberately no CouchDB container -- the chaincode uses LevelDB and
+# composite-key indexes only, per the Section 3.9 technology-stack choice
+# and to keep the MVP's resource footprint low (Section 3.2: 4GB RAM target).
+
+volumes:
+  orderer.patientchain.local:
+  peer0.hospitala.patientchain.local:
+  peer0.hospitalb.patientchain.local:
+
+networks:
+  patientchain:
+    name: patientchain
+
+services:
+  orderer.patientchain.local:
+    container_name: orderer.patientchain.local
+    image: hyperledger/fabric-orderer:2.5
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=none
+      - ORDERER_CHANNELPARTICIPATION_ENABLED=true
+      - ORDERER_ADMIN_TLS_ENABLED=true
+      - ORDERER_ADMIN_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_ADMIN_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_ADMIN_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_TLS_CLIENTROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_LISTENADDRESS=0.0.0.0:7053
+    working_dir: /root
+    command: orderer
+    volumes:
+      - ./crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/msp:/var/hyperledger/orderer/msp
+      - ./crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls:/var/hyperledger/orderer/tls
+      - orderer.patientchain.local:/var/hyperledger/production/orderer
+    ports:
+      - "7050:7050"
+      - "7053:7053"
+    networks:
+      - patientchain
+
+  peer0.hospitala.patientchain.local:
+    container_name: peer0.hospitala.patientchain.local
+    image: hyperledger/fabric-peer:2.5
+    environment:
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=patientchain
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.hospitala.patientchain.local
+      - CORE_PEER_ADDRESS=peer0.hospitala.patientchain.local:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.hospitala.patientchain.local:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.hospitala.patientchain.local:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.hospitala.patientchain.local:7051
+      - CORE_PEER_LOCALMSPID=HospitalAMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      # LevelDB is the default state database -- consistent with Section 3.9.
+      - CORE_LEDGER_STATE_STATEDATABASE=goleveldb
+    working_dir: /root
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/msp:/etc/hyperledger/fabric/msp
+      - ./crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls:/etc/hyperledger/fabric/tls
+      - peer0.hospitala.patientchain.local:/var/hyperledger/production
+    ports:
+      - "7051:7051"
+    networks:
+      - patientchain
+    depends_on:
+      - orderer.patientchain.local
+
+  peer0.hospitalb.patientchain.local:
+    container_name: peer0.hospitalb.patientchain.local
+    image: hyperledger/fabric-peer:2.5
+    environment:
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=patientchain
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.hospitalb.patientchain.local
+      - CORE_PEER_ADDRESS=peer0.hospitalb.patientchain.local:9051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:9051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.hospitalb.patientchain.local:9052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:9052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.hospitalb.patientchain.local:9051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.hospitalb.patientchain.local:9051
+      - CORE_PEER_LOCALMSPID=HospitalBMSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_LEDGER_STATE_STATEDATABASE=goleveldb
+    working_dir: /root
+    command: peer node start
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./crypto-config/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/msp:/etc/hyperledger/fabric/msp
+      - ./crypto-config/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/tls:/etc/hyperledger/fabric/tls
+      - peer0.hospitalb.patientchain.local:/var/hyperledger/production
+    ports:
+      - "9051:9051"
+    networks:
+      - patientchain
+    depends_on:
+      - orderer.patientchain.local
+
+  cli:
+    container_name: cli
+    image: hyperledger/fabric-tools:2.5
+    tty: true
+    stdin_open: true
+    environment:
+      - GOPATH=/opt/gopath
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.hospitala.patientchain.local:7051
+      - CORE_PEER_LOCALMSPID=HospitalAMSP
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/hospitala.patientchain.local/users/Admin@hospitala.patientchain.local/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+      - ../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+      - ./crypto-config:/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto
+      - ./channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+    networks:
+      - patientchain
+    depends_on:
+      - orderer.patientchain.local
+      - peer0.hospitala.patientchain.local
+      - peer0.hospitalb.patientchain.local

@@ -1,0 +1,71 @@
+:root {
+  /* Color -- clinical ledger palette, deliberately not the AI-default warm-cream/terracotta pairing */
+  --ink: #16233d;          /* deep clinical navy -- primary text, headers */
+  --ink-soft: #3b4a68;     /* secondary text */
+  --parchment: #f6f4ee;    /* page background -- record-paper warmth without cliche cream+clay */
+  --panel: #ffffff;
+  --line: #dcd8cc;         /* hairline dividers, record-paper rule lines */
+  --verdigris: #2d7d76;    /* accent -- ledger stamp / medical teal */
+  --verdigris-dark: #1f5b56;
+  --amber: #b5762a;        /* pending / offline / attention */
+  --amber-bg: #fbf1e2;
+  --sage: #4a7c59;         /* active / success */
+  --sage-bg: #eaf3ec;
+  --rust: #a63d34;         /* revoked / error */
+  --rust-bg: #fbeae8;
+
+  --font-ui: -apple-system, "Segoe UI", "IBM Plex Sans", Helvetica, Arial, sans-serif;
+  --font-data: "IBM Plex Mono", "SFMono-Regular", Consolas, Menlo, monospace;
+
+  --radius: 3px;
+  --shadow-panel: 0 1px 2px rgba(22, 35, 61, 0.06), 0 1px 0 rgba(22, 35, 61, 0.04);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .mono, .data {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: var(--verdigris-dark);
+}
+
+::selection {
+  background: var(--verdigris);
+  color: white;
+}
+
+:focus-visible {
+  outline: 2px solid var(--verdigris);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

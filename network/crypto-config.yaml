@@ -1,0 +1,29 @@
+# crypto-config.yaml
+# Generates MSP/TLS material for a two-hospital PatientChain pilot network,
+# matching the "peer nodes run by each participating facility" design in
+# Section 3.4. Add another entry under PeerOrgs to onboard a third
+# hospital (Phase 2, Section 3.12 / Table 4).
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: patientchain.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+
+PeerOrgs:
+  - Name: HospitalA
+    Domain: hospitala.patientchain.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+    Users:
+      Count: 1
+
+  - Name: HospitalB
+    Domain: hospitalb.patientchain.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+    Users:
+      Count: 1
