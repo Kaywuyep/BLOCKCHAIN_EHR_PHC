@@ -95,14 +95,19 @@ class FabricLedgerService {
   }
 
   // ---------- PatientRegistry ----------
-  registerPatient({ patientDID, publicKey }) {
-    return this._submit('PatientRegistryContract', 'RegisterPatient', patientDID, publicKey || '');
+  // The chaincode's write functions return only an error, so after each
+  // submit (which waits for the block to commit) we read the committed
+  // state back. That keeps the return values identical to the simulator's,
+  // which the routes rely on.
+  async registerPatient({ patientDID, publicKey }) {
+    await this._submit('PatientRegistryContract', 'RegisterPatient', patientDID, publicKey || '');
+    return this.getPatient(patientDID);
   }
   getPatient(patientDID) {
     return this._evaluate('PatientRegistryContract', 'GetPatient', patientDID);
   }
-  registerRecordReference({ refID, patientDID, hospitalID, recordType, date }) {
-    return this._submit(
+  async registerRecordReference({ refID, patientDID, hospitalID, recordType, date }) {
+    await this._submit(
       'PatientRegistryContract',
       'RegisterRecordReference',
       refID,
@@ -111,6 +116,8 @@ class FabricLedgerService {
       recordType,
       date || new Date().toISOString()
     );
+    const refs = (await this.getRecordReferencesForPatient(patientDID)) || [];
+    return refs.find((r) => r.refID === refID) || null;
   }
   getRecordReferencesForPatient(patientDID) {
     return this._evaluate('PatientRegistryContract', 'GetRecordReferencesForPatient', patientDID);
@@ -120,8 +127,8 @@ class FabricLedgerService {
   // scope is JSON-encoded because Fabric chaincode arguments are plain
   // strings; the chaincode decodes it back into []string (see
   // accesscontrol.go's RequestAccess).
-  requestAccess({ grantID, patientDID, providerID, hospitalID, scope, purpose }) {
-    return this._submit(
+  async requestAccess({ grantID, patientDID, providerID, hospitalID, scope, purpose }) {
+    await this._submit(
       'AccessControlContract',
       'RequestAccess',
       grantID,
@@ -131,12 +138,15 @@ class FabricLedgerService {
       JSON.stringify(scope || []),
       purpose || 'Treatment'
     );
+    return this.checkAccess({ grantID });
   }
-  grantAccess({ grantID, durationMinutes }) {
-    return this._submit('AccessControlContract', 'GrantAccess', grantID, String(durationMinutes));
+  async grantAccess({ grantID, durationMinutes }) {
+    await this._submit('AccessControlContract', 'GrantAccess', grantID, String(durationMinutes));
+    return this.checkAccess({ grantID });
   }
-  revokeAccess({ grantID }) {
-    return this._submit('AccessControlContract', 'RevokeAccess', grantID);
+  async revokeAccess({ grantID }) {
+    await this._submit('AccessControlContract', 'RevokeAccess', grantID);
+    return this.checkAccess({ grantID });
   }
   checkAccess({ grantID }) {
     return this._evaluate('AccessControlContract', 'CheckAccess', grantID);
@@ -144,11 +154,13 @@ class FabricLedgerService {
   getGrantsForPatient(patientDID) {
     return this._evaluate('AccessControlContract', 'GetGrantsForPatient', patientDID);
   }
-  breakGlassAccess({ grantID, patientDID, providerID, hospitalID, justification }) {
-    return this._submit('AccessControlContract', 'BreakGlassAccess', grantID, patientDID, providerID, hospitalID, justification);
+  async breakGlassAccess({ grantID, patientDID, providerID, hospitalID, justification }) {
+    await this._submit('AccessControlContract', 'BreakGlassAccess', grantID, patientDID, providerID, hospitalID, justification);
+    return this.checkAccess({ grantID });
   }
-  reviewBreakGlass({ grantID, reviewerID, notes }) {
-    return this._submit('AccessControlContract', 'ReviewBreakGlass', grantID, reviewerID, notes || '');
+  async reviewBreakGlass({ grantID, reviewerID, notes }) {
+    await this._submit('AccessControlContract', 'ReviewBreakGlass', grantID, reviewerID, notes || '');
+    return this.checkAccess({ grantID });
   }
   getPendingBreakGlassReviews() {
     return this._evaluate('AccessControlContract', 'GetPendingBreakGlassReviews');
@@ -159,7 +171,10 @@ class FabricLedgerService {
     return this._submit(
       'AuditLogContract',
       'WriteAuditEntry',
-      entryID,
+      // Callers (routes, offline reconcile) don't supply an ID; the
+      // simulator mints one, so the Fabric path must too or every audit
+      // write after the first collides on the same key.
+      entryID || crypto.randomUUID(),
       patientDID,
       eventType,
       actorID,

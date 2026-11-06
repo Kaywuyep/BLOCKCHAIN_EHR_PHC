@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // PatientRegistryContract manages patient DIDs and on-chain record-reference
@@ -18,22 +18,22 @@ type PatientRegistryContract struct {
 // Patient represents a registered patient DID. No demographic or clinical
 // data is stored here — the DID is the sole identifier on-chain.
 type Patient struct {
-	DocType      string    `json:"docType"` // "patient"
-	PatientDID   string    `json:"patientDID"`
-	PublicKey    string    `json:"publicKey"` // DID public key material
-	RegisteredAt time.Time `json:"registeredAt"`
+	DocType      string `json:"docType"` // "patient"
+	PatientDID   string `json:"patientDID"`
+	PublicKey    string `json:"publicKey"` // DID public key material
+	RegisteredAt string `json:"registeredAt"`
 }
 
 // RecordReference is the only artifact ever written on-chain about a
 // clinical record: a pointer, never the record itself.
 type RecordReference struct {
-	DocType      string    `json:"docType"` // "recordref"
-	RefID        string    `json:"refID"`
-	PatientDID   string    `json:"patientDID"`
-	HospitalID   string    `json:"hospitalID"`
-	RecordType   string    `json:"recordType"` // e.g. "encounter", "lab", "imaging"
-	Date         time.Time `json:"date"`
-	RegisteredBy string    `json:"registeredBy"` // hospital's reference-service identity
+	DocType      string `json:"docType"` // "recordref"
+	RefID        string `json:"refID"`
+	PatientDID   string `json:"patientDID"`
+	HospitalID   string `json:"hospitalID"`
+	RecordType   string `json:"recordType"` // e.g. "encounter", "lab", "imaging"
+	Date         string `json:"date"`
+	RegisteredBy string `json:"registeredBy"` // hospital's reference-service identity
 }
 
 // RegisterPatient creates a new patient DID entry on-chain. Idempotent:
@@ -59,7 +59,7 @@ func (c *PatientRegistryContract) RegisterPatient(ctx contractapi.TransactionCon
 		DocType:      "patient",
 		PatientDID:   patientDID,
 		PublicKey:    publicKey,
-		RegisteredAt: txTimestamp.AsTime(),
+		RegisteredAt: formatTS(txTimestamp.AsTime()),
 	}
 
 	patientJSON, err := json.Marshal(patient)
@@ -128,7 +128,7 @@ func (c *PatientRegistryContract) RegisterRecordReference(ctx contractapi.Transa
 		PatientDID:   patientDID,
 		HospitalID:   hospitalID,
 		RecordType:   recordType,
-		Date:         date,
+		Date:         formatTS(date),
 		RegisteredBy: callerID,
 	}
 

@@ -3,13 +3,8 @@
 const express = require('express');
 const { randomUUID } = require('crypto');
 
-function patientsRouter(ledgerPromise, fhirAdapter, identityService) {
+function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   const router = express.Router();
-
-  function demographicsFromBody(body) {
-    const { name, dob, sex, phone, nin } = body;
-    return { name, dob, sex, phone, nin };
-  }
 
   // ledger.getPatient() throws (synchronously, in simulated mode; via a
   // rejected promise in Fabric mode) when the patient doesn't exist. A
@@ -24,52 +19,18 @@ function patientsRouter(ledgerPromise, fhirAdapter, identityService) {
     }
   }
 
-  // Preview-only MPI lookup (docs/design.md Section 4): lets a hospital
-  // registrar check whether a person looks like an existing PatientChain
-  // patient *before* deciding how to register them. Never writes anything.
-  router.get('/match', (req, res) => {
-    try {
-      const query = demographicsFromBody(req.query);
-      if (!identityService.constructor.hasAnyDemographics(query)) {
-        return res.status(400).json({ error: 'at least one of name, dob, sex, phone or nin is required' });
-      }
-      res.json(identityService.matchPatient(query));
-    } catch (err) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
   // Register a new patient DID on-chain, and (separately, off-chain) at a
   // hospital's local patient index -- mirroring how a real deployment
-  // would have the patient app write to PatientRegistry and, independently,
-  // the hospital's registration desk assign an MRN.
-  //
-  // If demographic fields are supplied, this runs the Master Patient Index
-  // match first (docs/design.md Section 4): a confident match reuses the
-  // existing PatientChain DID instead of minting a new one, and a possible
-  // duplicate is refused (409) with candidates for manual review, unless
-  // the caller passes `force: true` to register a new identity anyway.
+  // would have the patient app write to PatientRegistry and,
+  // independently, the hospital's registration desk assign a fresh MRN.
+  // No demographic matching happens here: PatientRegistry.RegisterPatient
+  // only ever mints or reuses a DID. Linking that DID to a record a
+  // patient already has at some *other* hospital is a separate,
+  // patient-asserted step -- see POST /:did/link-facility below.
   router.post('/register', async (req, res) => {
     try {
       const ledger = await ledgerPromise;
-      const demographics = demographicsFromBody(req.body);
-      const hasDemographics = identityService.constructor.hasAnyDemographics(demographics);
-
       let patientDID = req.body.patientDID;
-      let identityResult = null;
-
-      if (hasDemographics && !patientDID && !req.body.force) {
-        identityResult = identityService.matchPatient(demographics);
-        if (identityResult.matchType === 'POSSIBLE_DUPLICATE') {
-          return res.status(409).json({
-            error: 'possible duplicate patient -- resolve via POST /:did/link or resubmit with force:true',
-            identity: identityResult,
-          });
-        }
-        if (identityResult.matchType === 'CONFIDENT_MATCH') {
-          patientDID = identityResult.patientDID;
-        }
-      }
 
       let patient;
       const alreadyRegistered = await tryGetPatient(ledger, patientDID);
@@ -82,11 +43,7 @@ function patientsRouter(ledgerPromise, fhirAdapter, identityService) {
         patient = await ledger.registerPatient({ patientDID, publicKey });
       }
 
-      if (hasDemographics) {
-        identityService.registerDemographics(patientDID, demographics);
-      }
-
-      const response = { patient, identity: identityResult };
+      const response = { patient };
       if (req.body.hospitalID) {
         const mrn = fhirAdapter.registerLocalPatient(req.body.hospitalID, patientDID, req.body.mrn);
         response.localHospitalMrn = mrn;
@@ -97,27 +54,66 @@ function patientsRouter(ledgerPromise, fhirAdapter, identityService) {
     }
   });
 
-  // Lets a registrar explicitly resolve an MPI "possible duplicate": link
-  // the demographics (and optionally a hospital MRN) to an *existing*
-  // PatientChain DID rather than minting a new one.
-  router.post('/:did/link', async (req, res) => {
+  // Lets a hospital add an entry to its own pre-existing patient roster --
+  // the off-chain "legacy EMR data" that link-facility below checks a
+  // patient's claimed hospital number + date of birth against. Represents
+  // a hospital's registration desk (or a one-off data migration), never a
+  // PatientChain identity operation -- nothing here ever touches the
+  // ledger. See the Admin Dashboard's "Hospital local patient roster" panel.
+  router.post('/local-records/:hospitalID', (req, res) => {
     try {
-      const ledger = await ledgerPromise;
-      const patientDID = req.params.did;
-      const patient = await ledger.getPatient(patientDID); // throws 404-ish if not registered
-      const demographics = demographicsFromBody(req.body);
-      if (identityService.constructor.hasAnyDemographics(demographics)) {
-        identityService.registerDemographics(patientDID, demographics);
+      const { hospitalNumber, name, dob } = req.body;
+      if (!hospitalNumber || !name || !dob) {
+        return res.status(400).json({ error: 'hospitalNumber, name and dob are required' });
       }
-
-      const response = { patient };
-      if (req.body.hospitalID) {
-        const mrn = fhirAdapter.registerLocalPatient(req.body.hospitalID, patientDID, req.body.mrn);
-        response.localHospitalMrn = mrn;
-      }
-      res.json(response);
+      const record = fhirAdapter.addLocalPatientRecord(req.params.hospitalID, hospitalNumber, { name, dob });
+      res.status(201).json(record);
     } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.get('/local-records/:hospitalID', (req, res) => {
+    res.json(fhirAdapter.listLocalPatientRecords(req.params.hospitalID));
+  });
+
+  // Step 1 of the patient-asserted facility-linkage flow: the patient
+  // claims a hospital number and date of birth for a hospital they
+  // already have a record at. A match returns the record's name so the
+  // patient can confirm it's them -- it does not link anything yet. No
+  // match (wrong number OR wrong date of birth -- deliberately
+  // indistinguishable) returns a generic 404, and repeated attempts are
+  // rate-limited per patient as a second layer against enumeration.
+  router.post('/:did/link-facility', (req, res) => {
+    try {
+      const { hospitalID, hospitalNumber, dateOfBirth } = req.body;
+      if (!hospitalID || !hospitalNumber || !dateOfBirth) {
+        return res.status(400).json({ error: 'hospitalID, hospitalNumber and dateOfBirth are required' });
+      }
+      const result = linkageService.linkFacility(req.params.did, hospitalID, hospitalNumber, dateOfBirth);
+      res.json(result);
+    } catch (err) {
+      if (err.message.startsWith('too many lookup attempts')) {
+        return res.status(429).json({ error: err.message });
+      }
       res.status(404).json({ error: err.message });
+    }
+  });
+
+  // Step 2: only succeeds once the patient has seen the matched name from
+  // link-facility and explicitly confirmed it's them. Records the DID
+  // <-> hospital-number mapping locally via the FHIR Adapter -- never
+  // on-chain.
+  router.post('/:did/confirm-link', (req, res) => {
+    try {
+      const { hospitalID, hospitalNumber } = req.body;
+      if (!hospitalID || !hospitalNumber) {
+        return res.status(400).json({ error: 'hospitalID and hospitalNumber are required' });
+      }
+      const result = linkageService.confirmLink(req.params.did, hospitalID, hospitalNumber);
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
     }
   });
 

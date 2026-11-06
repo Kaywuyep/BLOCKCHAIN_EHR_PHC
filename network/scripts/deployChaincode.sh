@@ -4,14 +4,17 @@
 # costmetrics, one chaincode package) on both hospital peers.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export FABRIC_CFG_PATH="$PWD/config"
 
 CHANNEL_NAME=patientchainchannel
 CC_NAME=patientchain
 CC_VERSION=1.0
 CC_SEQUENCE=1
-CC_SRC_PATH=../chaincode
-ORDERER_CA=crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls/ca.crt
+CC_SRC_PATH="$PWD/../chaincode"
+ORDERER_CA="$PWD/crypto-config/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls/ca.crt"
 ORDERER_ADDR=localhost:7050
+ORDERER_HOSTNAME=orderer.patientchain.local
+CLI_ROOT=/opt/gopath/src/github.com/hyperledger/fabric/peer
 
 peerEnvHospitalA() {
   export CORE_PEER_LOCALMSPID=HospitalAMSP
@@ -19,6 +22,7 @@ peerEnvHospitalA() {
   export CORE_PEER_MSPCONFIGPATH=$PWD/crypto-config/peerOrganizations/hospitala.patientchain.local/users/Admin@hospitala.patientchain.local/msp
   export CORE_PEER_ADDRESS=localhost:7051
   export CORE_PEER_TLS_ENABLED=true
+  export CORE_PEER_TLS_SERVERHOSTOVERRIDE=peer0.hospitala.patientchain.local
 }
 
 peerEnvHospitalB() {
@@ -27,6 +31,7 @@ peerEnvHospitalB() {
   export CORE_PEER_MSPCONFIGPATH=$PWD/crypto-config/peerOrganizations/hospitalb.patientchain.local/users/Admin@hospitalb.patientchain.local/msp
   export CORE_PEER_ADDRESS=localhost:9051
   export CORE_PEER_TLS_ENABLED=true
+  export CORE_PEER_TLS_SERVERHOSTOVERRIDE=peer0.hospitalb.patientchain.local
 }
 
 echo "-- Vendoring chaincode Go modules --"
@@ -52,12 +57,14 @@ echo "Package ID: $PACKAGE_ID"
 echo "-- Approving for HospitalA --"
 peerEnvHospitalA
 peer lifecycle chaincode approveformyorg -o "$ORDERER_ADDR" --tls --cafile "$ORDERER_CA" \
+  --ordererTLSHostnameOverride "$ORDERER_HOSTNAME" \
   --channelID "$CHANNEL_NAME" --name "$CC_NAME" --version "$CC_VERSION" \
   --package-id "$PACKAGE_ID" --sequence "$CC_SEQUENCE"
 
 echo "-- Approving for HospitalB --"
 peerEnvHospitalB
 peer lifecycle chaincode approveformyorg -o "$ORDERER_ADDR" --tls --cafile "$ORDERER_CA" \
+  --ordererTLSHostnameOverride "$ORDERER_HOSTNAME" \
   --channelID "$CHANNEL_NAME" --name "$CC_NAME" --version "$CC_VERSION" \
   --package-id "$PACKAGE_ID" --sequence "$CC_SEQUENCE"
 
@@ -66,9 +73,14 @@ peer lifecycle chaincode checkcommitreadiness --channelID "$CHANNEL_NAME" --name
   --version "$CC_VERSION" --sequence "$CC_SEQUENCE" --output json
 
 echo "-- Committing chaincode definition --"
-peer lifecycle chaincode commit -o "$ORDERER_ADDR" --tls --cafile "$ORDERER_CA" \
+docker exec cli peer lifecycle chaincode commit \
+  -o orderer.patientchain.local:7050 \
+  --tls --cafile "$CLI_ROOT/crypto/ordererOrganizations/patientchain.local/orderers/orderer.patientchain.local/tls/ca.crt" \
+  --ordererTLSHostnameOverride "$ORDERER_HOSTNAME" \
   --channelID "$CHANNEL_NAME" --name "$CC_NAME" --version "$CC_VERSION" --sequence "$CC_SEQUENCE" \
-  --peerAddresses localhost:7051 --tlsRootCertFiles crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/ca.crt \
-  --peerAddresses localhost:9051 --tlsRootCertFiles crypto-config/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/tls/ca.crt
+  --peerAddresses peer0.hospitala.patientchain.local:7051 \
+  --tlsRootCertFiles "$CLI_ROOT/crypto/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/ca.crt" \
+  --peerAddresses peer0.hospitalb.patientchain.local:9051 \
+  --tlsRootCertFiles "$CLI_ROOT/crypto/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/tls/ca.crt"
 
 echo "Chaincode '$CC_NAME' committed on channel '$CHANNEL_NAME'."

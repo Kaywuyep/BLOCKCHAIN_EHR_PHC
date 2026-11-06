@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // AccessControlContract manages provider permission grants and revocations
@@ -49,19 +49,19 @@ type AccessGrant struct {
 	ProviderID     string      `json:"providerID"`
 	HospitalID     string      `json:"hospitalID"`
 	GrantType      GrantType   `json:"grantType"`
-	Scope          []string    `json:"scope,omitempty"`
-	Purpose        string      `json:"purpose,omitempty"`
-	Justification  string      `json:"justification,omitempty"` // break-glass only
+	Scope          []string    `json:"scope,omitempty" metadata:"scope,optional"`
+	Purpose        string      `json:"purpose,omitempty" metadata:"purpose,optional"`
+	Justification  string      `json:"justification,omitempty" metadata:"justification,optional"` // break-glass only
 	Status         GrantStatus `json:"status"`
-	RequestedAt    time.Time   `json:"requestedAt"`
-	GrantedAt      *time.Time  `json:"grantedAt,omitempty"`
-	ExpiresAt      *time.Time  `json:"expiresAt,omitempty"`
-	RevokedAt      *time.Time  `json:"revokedAt,omitempty"`
+	RequestedAt    string      `json:"requestedAt"`
+	GrantedAt      string      `json:"grantedAt,omitempty" metadata:"grantedAt,optional"`
+	ExpiresAt      string      `json:"expiresAt,omitempty" metadata:"expiresAt,optional"`
+	RevokedAt      string      `json:"revokedAt,omitempty" metadata:"revokedAt,optional"`
 	ReviewRequired bool        `json:"reviewRequired"`
 	Reviewed       bool        `json:"reviewed"`
-	ReviewedAt     *time.Time  `json:"reviewedAt,omitempty"`
-	ReviewedBy     string      `json:"reviewedBy,omitempty"`
-	ReviewNotes    string      `json:"reviewNotes,omitempty"`
+	ReviewedAt     string      `json:"reviewedAt,omitempty" metadata:"reviewedAt,optional"`
+	ReviewedBy     string      `json:"reviewedBy,omitempty" metadata:"reviewedBy,optional"`
+	ReviewNotes    string      `json:"reviewNotes,omitempty" metadata:"reviewNotes,optional"`
 }
 
 // RequestAccess is called by a clinician's system asking to view a
@@ -104,7 +104,7 @@ func (c *AccessControlContract) RequestAccess(ctx contractapi.TransactionContext
 		Scope:       scope,
 		Purpose:     purpose,
 		Status:      StatusPending,
-		RequestedAt: txTimestamp.AsTime(),
+		RequestedAt: formatTS(txTimestamp.AsTime()),
 	}
 
 	if err := putGrant(ctx, grant); err != nil {
@@ -161,9 +161,9 @@ func (c *AccessControlContract) BreakGlassAccess(ctx contractapi.TransactionCont
 		Purpose:        "Emergency",
 		Justification:  justification,
 		Status:         StatusActive,
-		RequestedAt:    now,
-		GrantedAt:      &now,
-		ExpiresAt:      &expires,
+		RequestedAt:    formatTS(now),
+		GrantedAt:      formatTS(now),
+		ExpiresAt:      formatTS(expires),
 		ReviewRequired: true,
 	}
 
@@ -220,7 +220,7 @@ func (c *AccessControlContract) ReviewBreakGlass(ctx contractapi.TransactionCont
 	now := txTimestamp.AsTime()
 
 	grant.Reviewed = true
-	grant.ReviewedAt = &now
+	grant.ReviewedAt = formatTS(now)
 	grant.ReviewedBy = reviewerID
 	grant.ReviewNotes = notes
 
@@ -292,8 +292,8 @@ func (c *AccessControlContract) GrantAccess(ctx contractapi.TransactionContextIn
 	expires := now.Add(time.Duration(durationMinutes) * time.Minute)
 
 	grant.Status = StatusActive
-	grant.GrantedAt = &now
-	grant.ExpiresAt = &expires
+	grant.GrantedAt = formatTS(now)
+	grant.ExpiresAt = formatTS(expires)
 
 	if err := putGrant(ctx, *grant); err != nil {
 		return err
@@ -323,7 +323,7 @@ func (c *AccessControlContract) RevokeAccess(ctx contractapi.TransactionContextI
 	now := txTimestamp.AsTime()
 
 	grant.Status = StatusRevoked
-	grant.RevokedAt = &now
+	grant.RevokedAt = formatTS(now)
 
 	if err := putGrant(ctx, *grant); err != nil {
 		return err
@@ -345,12 +345,16 @@ func (c *AccessControlContract) CheckAccess(ctx contractapi.TransactionContextIn
 	if err != nil {
 		return nil, err
 	}
-	if grant.Status == StatusActive && grant.ExpiresAt != nil {
+	if grant.Status == StatusActive && grant.ExpiresAt != "" {
 		txTimestamp, err := ctx.GetStub().GetTxTimestamp()
 		if err != nil {
 			return nil, err
 		}
-		if txTimestamp.AsTime().After(*grant.ExpiresAt) {
+		expiresAt, err := parseTS(grant.ExpiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("grant %s has a malformed expiry: %v", grantID, err)
+		}
+		if txTimestamp.AsTime().After(expiresAt) {
 			grant.Status = StatusExpired
 			// Persist the lazily-resolved expiry so subsequent reads are consistent.
 			_ = putGrant(ctx, *grant)

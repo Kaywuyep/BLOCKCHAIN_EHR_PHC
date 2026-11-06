@@ -1,0 +1,5 @@
+dev-peer0.hospitala.patientchain.local-patientchain_1.0-dc35d2131ed728c685304fc6b7afe4dc6783088f796f0857830f0418efc3e813	11.62MiB / 2GiB	0.00%
+dev-peer0.hospitalb.patientchain.local-patientchain_1.0-dc35d2131ed728c685304fc6b7afe4dc6783088f796f0857830f0418efc3e813	11.3MiB / 2GiB	0.00%
+peer0.hospitala.patientchain.local	82.96MiB / 14.32GiB	1.37%
+peer0.hospitalb.patientchain.local	74.11MiB / 14.32GiB	1.34%
+orderer.patientchain.local	28.91MiB / 14.32GiB	0.08%

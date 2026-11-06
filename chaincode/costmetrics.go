@@ -1,9 +1,7 @@
 package main
 
 import (
-	"strconv"
-
-	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // CostMetricsContract exposes the raw event counters that the backend's
@@ -18,10 +16,9 @@ type CostMetricsContract struct {
 
 // GetCounters returns the raw lifetime counts for each event category.
 func (c *CostMetricsContract) GetCounters(ctx contractapi.TransactionContextInterface) (map[string]int, error) {
-	categories := []string{"reference", "grant", "audit", "registration", "breakglass"}
 	counters := map[string]int{}
-	for _, cat := range categories {
-		v, err := readCounter(ctx, cat)
+	for _, cat := range counterCategories {
+		v, err := countEvents(ctx, cat)
 		if err != nil {
 			return nil, err
 		}
@@ -30,30 +27,44 @@ func (c *CostMetricsContract) GetCounters(ctx contractapi.TransactionContextInte
 	return counters, nil
 }
 
+var counterCategories = []string{"reference", "grant", "audit", "registration", "breakglass"}
+
+// counterObjectType namespaces the per-event marker keys.
+const counterObjectType = "costevent"
+
+// bumpCostCounter records one event by writing its own marker key,
+// costevent~<category>~<txID>, instead of reading and incrementing a single
+// shared counter. A shared counter is a write hotspot: every transaction of
+// a category reads and writes the same key, so when two of them land in the
+// same block Fabric's MVCC validation keeps the first and invalidates the
+// rest (MVCC_READ_CONFLICT). That made concurrent patient actions fail and
+// defeated the batching the cost model depends on. Marker keys are
+// write-only and unique per transaction, so they never conflict. Each
+// contract function bumps a given category at most once, so the txID alone
+// makes the key unique.
 func bumpCostCounter(ctx contractapi.TransactionContextInterface, category string) error {
-	current, err := readCounter(ctx, category)
+	key, err := ctx.GetStub().CreateCompositeKey(counterObjectType, []string{category, ctx.GetStub().GetTxID()})
 	if err != nil {
 		return err
 	}
-	current++
-	return ctx.GetStub().PutState(counterKey(category), []byte(strconv.Itoa(current)))
+	return ctx.GetStub().PutState(key, []byte{0x01})
 }
 
-func readCounter(ctx contractapi.TransactionContextInterface, category string) (int, error) {
-	data, err := ctx.GetStub().GetState(counterKey(category))
+// countEvents counts a category's marker keys. This is a range scan, which
+// is fine for a pilot-scale ledger; a production deployment would roll the
+// markers up into periodic snapshots.
+func countEvents(ctx contractapi.TransactionContextInterface, category string) (int, error) {
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey(counterObjectType, []string{category})
 	if err != nil {
 		return 0, err
 	}
-	if data == nil {
-		return 0, nil
+	defer iter.Close()
+	n := 0
+	for iter.HasNext() {
+		if _, err := iter.Next(); err != nil {
+			return 0, err
+		}
+		n++
 	}
-	v, err := strconv.Atoi(string(data))
-	if err != nil {
-		return 0, err
-	}
-	return v, nil
-}
-
-func counterKey(category string) string {
-	return "COUNTER_" + category
+	return n, nil
 }

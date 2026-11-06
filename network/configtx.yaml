@@ -152,7 +152,12 @@ Profiles:
 
   PatientChainChannel:
     <<: *ChannelDefaults
-    Consortium: PatientChainConsortium
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
     Application:
       <<: *ApplicationDefaults
       Organizations:

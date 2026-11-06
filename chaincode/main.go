@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // main packages PatientRegistry, AccessControl, AuditLog and CostMetrics

@@ -1,0 +1,476 @@
+{
+  "run": "F30BEE",
+  "startedAt": "2026-11-06T10:43:48.141Z",
+  "base": "http://localhost:4601",
+  "ledgerMode": "simulated",
+  "patients": 10,
+  "hl7Ingestion": {
+    "hospital-a": {
+      "messagesSent": 30,
+      "acceptedAA": 30,
+      "rejectedAE": 0,
+      "otherAck": 0,
+      "acceptedByTrigger": {
+        "A01": 10,
+        "A08": 10,
+        "A03": 10
+      },
+      "ackLatencyMs": {
+        "n": 30,
+        "mean": 1.9,
+        "median": 1.8,
+        "p95": 3.3,
+        "min": 1,
+        "max": 7.7
+      },
+      "malformedMessagesAck": [
+        "AE",
+        "AE"
+      ],
+      "patientsOnRoster": 10,
+      "patientsExpected": 10
+    },
+    "hospital-b": {
+      "messagesSent": 30,
+      "acceptedAA": 30,
+      "rejectedAE": 0,
+      "otherAck": 0,
+      "acceptedByTrigger": {
+        "A01": 10,
+        "A08": 10,
+        "A03": 10
+      },
+      "ackLatencyMs": {
+        "n": 30,
+        "mean": 1.6,
+        "median": 1.6,
+        "p95": 2,
+        "min": 1.1,
+        "max": 2
+      },
+      "malformedMessagesAck": [
+        "AE",
+        "AE"
+      ],
+      "patientsOnRoster": 10,
+      "patientsExpected": 10
+    }
+  },
+  "crossFacility": {
+    "directions": {
+      "B->A": {
+        "attempts": 10,
+        "resolvedOk": 10,
+        "revokedThenRefused": 10,
+        "revokeLeaks": 0,
+        "successRate": 1
+      },
+      "A->B": {
+        "attempts": 10,
+        "resolvedOk": 10,
+        "revokedThenRefused": 10,
+        "revokeLeaks": 0,
+        "successRate": 1
+      }
+    },
+    "accuracy": {
+      "checked": 20,
+      "correct": 20,
+      "mismatches": []
+    },
+    "timingsMs": {
+      "register": {
+        "n": 10,
+        "mean": 4.1,
+        "median": 3.8,
+        "p95": 8.7,
+        "min": 2.5,
+        "max": 8.7
+      },
+      "registerReference": {
+        "n": 20,
+        "mean": 4.1,
+        "median": 3.9,
+        "p95": 5.6,
+        "min": 3.5,
+        "max": 5.6
+      },
+      "linkLookup": {
+        "n": 10,
+        "mean": 4,
+        "median": 3.9,
+        "p95": 5.9,
+        "min": 2.4,
+        "max": 5.9
+      },
+      "linkConfirm": {
+        "n": 10,
+        "mean": 4.4,
+        "median": 3.9,
+        "p95": 8,
+        "min": 3.4,
+        "max": 8
+      },
+      "request": {
+        "n": 20,
+        "mean": 3.5,
+        "median": 3.7,
+        "p95": 4.4,
+        "min": 2.3,
+        "max": 4.4
+      },
+      "grant": {
+        "n": 20,
+        "mean": 3.3,
+        "median": 3.5,
+        "p95": 4.7,
+        "min": 2.1,
+        "max": 4.7
+      },
+      "authorisationLatency": {
+        "n": 20,
+        "mean": 7.2,
+        "median": 7.1,
+        "p95": 11.8,
+        "min": 5.3,
+        "max": 11.8
+      },
+      "resolve": {
+        "n": 20,
+        "mean": 3.3,
+        "median": 3.2,
+        "p95": 6.3,
+        "min": 2,
+        "max": 6.3
+      },
+      "revoke": {
+        "n": 20,
+        "mean": 3.9,
+        "median": 4,
+        "p95": 4.7,
+        "min": 2.4,
+        "max": 4.7
+      }
+    },
+    "objectSizesBytes": {
+      "reference": {
+        "n": 20,
+        "mean": 221,
+        "median": 221,
+        "p95": 221,
+        "min": 221,
+        "max": 221
+      },
+      "grant": {
+        "n": 20,
+        "mean": 438,
+        "median": 438,
+        "p95": 438,
+        "min": 438,
+        "max": 438
+      },
+      "audit": {
+        "n": 9,
+        "mean": 325.6,
+        "median": 328,
+        "p95": 338,
+        "min": 316,
+        "max": 338
+      },
+      "fhirBundle": {
+        "n": 20,
+        "mean": 1598,
+        "median": 1598,
+        "p95": 1598,
+        "min": 1598,
+        "max": 1598
+      }
+    },
+    "negativeChecks": {
+      "outOfScopeResourceType": 403,
+      "purposeMismatch": 403,
+      "wrongHospital": 403,
+      "unregisteredProvider": 403,
+      "pendingNotYetGranted": 403,
+      "linkWrongDob": {
+        "status": 404,
+        "body": {
+          "error": "No matching record found"
+        }
+      },
+      "linkWrongNumber": {
+        "status": 404,
+        "body": {
+          "error": "No matching record found"
+        }
+      },
+      "linkResponsesIndistinguishable": true
+    }
+  },
+  "breakGlass": {
+    "events": 5,
+    "allActiveImmediately": true,
+    "allFlaggedForReview": true,
+    "pendingReviewBefore": 5,
+    "pendingReviewAfter": 0,
+    "auditHasBreakGlassEntry": true,
+    "auditHasReviewEntry": true,
+    "latencyMs": {
+      "n": 5,
+      "mean": 4.1,
+      "median": 4.3,
+      "p95": 4.9,
+      "min": 2.7,
+      "max": 4.9
+    }
+  },
+  "offlineSync": {
+    "actionsQueued": 15,
+    "allAcceptedAs202WhileOffline": true,
+    "queueingTimeMs": 66,
+    "reconciled": 15,
+    "synced": 15,
+    "failed": 0,
+    "reconcileTimeMs": 8,
+    "finalGrantStates": [
+      "REVOKED",
+      "REVOKED",
+      "REVOKED",
+      "REVOKED",
+      "REVOKED"
+    ],
+    "auditEntriesFlaggedQueuedOffline": 5,
+    "duplicateAuditEntries": 0
+  },
+  "costSummary": {
+    "params": {
+      "k": 2,
+      "Ce": 12,
+      "Co": 40,
+      "Cv": 6,
+      "b": 10
+    },
+    "counters": {
+      "registration": 10,
+      "reference": 20,
+      "grant": 86,
+      "audit": 78,
+      "breakglass": 5
+    },
+    "rates": {
+      "lambda_r": 5.691519635742743,
+      "lambda_g": 24.473534433693796,
+      "lambda_a": 22.1969265793967
+    },
+    "actionCostAtCurrentBatch": 22,
+    "actionCostCurve": [
+      {
+        "b": 1,
+        "cost": 58
+      },
+      {
+        "b": 2,
+        "cost": 38
+      },
+      {
+        "b": 3,
+        "cost": 31.333
+      },
+      {
+        "b": 4,
+        "cost": 28
+      },
+      {
+        "b": 5,
+        "cost": 26
+      },
+      {
+        "b": 6,
+        "cost": 24.667
+      },
+      {
+        "b": 7,
+        "cost": 23.714
+      },
+      {
+        "b": 8,
+        "cost": 23
+      },
+      {
+        "b": 9,
+        "cost": 22.444
+      },
+      {
+        "b": 10,
+        "cost": 22
+      },
+      {
+        "b": 11,
+        "cost": 21.636
+      },
+      {
+        "b": 12,
+        "cost": 21.333
+      },
+      {
+        "b": 13,
+        "cost": 21.077
+      },
+      {
+        "b": 14,
+        "cost": 20.857
+      },
+      {
+        "b": 15,
+        "cost": 20.667
+      },
+      {
+        "b": 16,
+        "cost": 20.5
+      },
+      {
+        "b": 17,
+        "cost": 20.353
+      },
+      {
+        "b": 18,
+        "cost": 20.222
+      },
+      {
+        "b": 19,
+        "cost": 20.105
+      },
+      {
+        "b": 20,
+        "cost": 20
+      },
+      {
+        "b": 21,
+        "cost": 19.905
+      },
+      {
+        "b": 22,
+        "cost": 19.818
+      },
+      {
+        "b": 23,
+        "cost": 19.739
+      },
+      {
+        "b": 24,
+        "cost": 19.667
+      },
+      {
+        "b": 25,
+        "cost": 19.6
+      },
+      {
+        "b": 26,
+        "cost": 19.538
+      },
+      {
+        "b": 27,
+        "cost": 19.481
+      },
+      {
+        "b": 28,
+        "cost": 19.429
+      },
+      {
+        "b": 29,
+        "cost": 19.379
+      },
+      {
+        "b": 30,
+        "cost": 19.333
+      },
+      {
+        "b": 31,
+        "cost": 19.29
+      },
+      {
+        "b": 32,
+        "cost": 19.25
+      },
+      {
+        "b": 33,
+        "cost": 19.212
+      },
+      {
+        "b": 34,
+        "cost": 19.176
+      },
+      {
+        "b": 35,
+        "cost": 19.143
+      },
+      {
+        "b": 36,
+        "cost": 19.111
+      },
+      {
+        "b": 37,
+        "cost": 19.081
+      },
+      {
+        "b": 38,
+        "cost": 19.053
+      },
+      {
+        "b": 39,
+        "cost": 19.026
+      },
+      {
+        "b": 40,
+        "cost": 19
+      },
+      {
+        "b": 41,
+        "cost": 18.976
+      },
+      {
+        "b": 42,
+        "cost": 18.952
+      },
+      {
+        "b": 43,
+        "cost": 18.93
+      },
+      {
+        "b": 44,
+        "cost": 18.909
+      },
+      {
+        "b": 45,
+        "cost": 18.889
+      },
+      {
+        "b": 46,
+        "cost": 18.87
+      },
+      {
+        "b": 47,
+        "cost": 18.851
+      },
+      {
+        "b": 48,
+        "cost": 18.833
+      },
+      {
+        "b": 49,
+        "cost": 18.816
+      },
+      {
+        "b": 50,
+        "cost": 18.8
+      }
+    ],
+    "ledgerRate": 1151.964,
+    "ledgerGrowth": {
+      "bytesPerSecond": 12942.52,
+      "baselineBytesPerSecondIfFullRecordOnChain": 269060.9,
+      "reductionFactor": 20.8
+    }
+  },
+  "finishedAt": "2026-11-06T10:43:49.112Z"
+}

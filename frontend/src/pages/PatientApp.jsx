@@ -2,12 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { LedgerStrip } from '../components/LedgerStrip';
 
-const DEMO_DID = 'did:patientchain:demo-patient-1';
-
-const EMPTY_DEMOGRAPHICS = { name: '', dob: '', sex: '', phone: '', nin: '' };
-
 export function PatientApp() {
-  const [patientDID, setPatientDID] = useState(DEMO_DID);
+  const [patientDID, setPatientDID] = useState('');
   const [patient, setPatient] = useState(null);
   const [references, setReferences] = useState([]);
   const [grants, setGrants] = useState([]);
@@ -15,8 +11,15 @@ export function PatientApp() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const [demographics, setDemographics] = useState(EMPTY_DEMOGRAPHICS);
-  const [identityResult, setIdentityResult] = useState(null);
+  const [homeHospitalID, setHomeHospitalID] = useState('');
+  const [homeHospitalNumber, setHomeHospitalNumber] = useState('');
+
+  const [facilityHospitalID, setFacilityHospitalID] = useState('');
+  const [facilityNumber, setFacilityNumber] = useState('');
+  const [facilityDob, setFacilityDob] = useState('');
+  const [facilityMatch, setFacilityMatch] = useState(null);
+  const [facilityError, setFacilityError] = useState(null);
+  const [linkedFacilities, setLinkedFacilities] = useState([]);
 
   async function loadAll(did) {
     setError(null);
@@ -37,91 +40,78 @@ export function PatientApp() {
   }
 
   useEffect(() => {
-    loadAll(patientDID);
+    if (patientDID) loadAll(patientDID);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function filledDemographics() {
-    return Object.fromEntries(Object.entries(demographics).filter(([, v]) => v && v.trim()));
-  }
-
-  async function handleCheckIdentity() {
-    setLoading(true);
-    setError(null);
-    try {
-      const filled = filledDemographics();
-      if (Object.keys(filled).length === 0) {
-        setError('Enter at least a name to run an identity check.');
-        return;
-      }
-      const result = await api.matchPatient(filled);
-      setIdentityResult(result);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function doRegister(extra = {}) {
+  async function handleRegister() {
     setLoading(true);
     setError(null);
     try {
       const result = await api.registerPatient({
         patientDID,
-        hospitalID: 'HospitalA-Lagos',
-        mrn: 'LAG-00231',
-        ...filledDemographics(),
-        ...extra,
+        hospitalID: homeHospitalID || undefined,
+        mrn: homeHospitalNumber || undefined,
       });
+      // When patientDID was left blank, the server mints one and returns
+      // it -- sync it back so the DID field and the reload below reflect
+      // it, instead of re-querying with the empty string that started this.
+      setPatientDID(result.patient.patientDID);
       setPatient(result.patient);
-      setIdentityResult(null);
-      await loadAll(patientDID);
-    } catch (e) {
-      // A 409 from the MPI possible-duplicate check comes back with an
-      // `identity` payload (docs/design.md Section 4) -- surface it as a
-      // decision point instead of a plain error.
-      if (e.message.startsWith('possible duplicate')) {
-        try {
-          const preview = await api.matchPatient(filledDemographics());
-          setIdentityResult(preview);
-        } catch {
-          setError(e.message);
-        }
-      } else {
-        setError(e.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleRegister() {
-    await doRegister();
-  }
-
-  async function handleRegisterAnyway() {
-    await doRegister({ force: true });
-  }
-
-  async function handleLinkToExisting(candidateDID) {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.linkPatient(candidateDID, {
-        hospitalID: 'HospitalA-Lagos',
-        mrn: 'LAG-00231',
-        ...filledDemographics(),
-      });
-      setPatientDID(candidateDID);
-      setPatient(result.patient);
-      setIdentityResult(null);
-      await loadAll(candidateDID);
+      await loadAll(result.patient.patientDID);
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  // Step 1 of the patient-asserted facility-linkage flow: look the
+  // hospital number + DOB up against that hospital's own records. A match
+  // returns just a name to confirm -- nothing is linked yet.
+  async function handleLookupFacility() {
+    setLoading(true);
+    setFacilityError(null);
+    try {
+      const result = await api.linkFacility(patientDID, {
+        hospitalID: facilityHospitalID,
+        hospitalNumber: facilityNumber,
+        dateOfBirth: facilityDob,
+      });
+      setFacilityMatch(result);
+    } catch (e) {
+      setFacilityError(e.message);
+      setFacilityMatch(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Step 2: only reachable after the patient has seen the matched name
+  // and said "yes, this is me".
+  async function handleConfirmFacilityLink() {
+    setLoading(true);
+    setFacilityError(null);
+    try {
+      const result = await api.confirmLink(patientDID, {
+        hospitalID: facilityHospitalID,
+        hospitalNumber: facilityNumber,
+      });
+      setLinkedFacilities((prev) => [...prev.filter((f) => f.hospitalID !== result.hospitalID), result]);
+      setFacilityMatch(null);
+      setFacilityNumber('');
+      setFacilityDob('');
+    } catch (e) {
+      setFacilityError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleRejectFacilityMatch() {
+    setFacilityMatch(null);
+    setFacilityNumber('');
+    setFacilityDob('');
   }
 
   async function handleGrant(grantID, minutes) {
@@ -182,42 +172,32 @@ export function PatientApp() {
         </div>
         <div className="field">
           <label>Patient DID</label>
-          <input value={patientDID} onChange={(e) => setPatientDID(e.target.value)} />
+          <input
+            value={patientDID}
+            onChange={(e) => setPatientDID(e.target.value)}
+            placeholder="did:patientchain:... (leave blank to mint a new one)"
+          />
         </div>
 
         {!patient && (
-          <>
-            <p className="hint" style={{ marginTop: 4 }}>
-              Master Patient Index (docs/design.md §4): enter your details once so PatientChain can tell whether
-              you already have a record at another hospital before minting a new identity.
-            </p>
-            <div className="grid-2">
-              <div className="field">
-                <label>Full name</label>
-                <input value={demographics.name} onChange={(e) => setDemographics((d) => ({ ...d, name: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Date of birth</label>
-                <input type="date" value={demographics.dob} onChange={(e) => setDemographics((d) => ({ ...d, dob: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>Sex</label>
-                <select value={demographics.sex} onChange={(e) => setDemographics((d) => ({ ...d, sex: e.target.value }))}>
-                  <option value="">—</option>
-                  <option value="F">F</option>
-                  <option value="M">M</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>Phone</label>
-                <input value={demographics.phone} onChange={(e) => setDemographics((d) => ({ ...d, phone: e.target.value }))} />
-              </div>
-              <div className="field">
-                <label>NIN (if available)</label>
-                <input value={demographics.nin} onChange={(e) => setDemographics((d) => ({ ...d, nin: e.target.value }))} />
-              </div>
+          <div className="grid-2">
+            <div className="field">
+              <label>Home hospital ID (optional)</label>
+              <input
+                value={homeHospitalID}
+                onChange={(e) => setHomeHospitalID(e.target.value)}
+                placeholder="leave blank to register a DID with no hospital yet"
+              />
             </div>
-          </>
+            <div className="field">
+              <label>Hospital number (optional — leave blank to have one assigned)</label>
+              <input
+                value={homeHospitalNumber}
+                onChange={(e) => setHomeHospitalNumber(e.target.value)}
+                disabled={!homeHospitalID}
+              />
+            </div>
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
@@ -225,54 +205,11 @@ export function PatientApp() {
             Load
           </button>
           {!patient && (
-            <>
-              <button className="btn btn-ghost" onClick={handleCheckIdentity} disabled={loading}>
-                Check identity (MPI)
-              </button>
-              <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>
-                Register this DID on-chain
-              </button>
-            </>
+            <button className="btn btn-primary" onClick={handleRegister} disabled={loading}>
+              Register this DID on-chain
+            </button>
           )}
         </div>
-
-        {identityResult && !patient && (
-          <div style={{ marginTop: 14, padding: 12, border: '1px solid var(--line)', borderRadius: 8 }}>
-            {identityResult.matchType === 'NEW' && (
-              <p className="hint">No existing PatientChain record looks like a match — safe to register as new.</p>
-            )}
-            {identityResult.matchType === 'CONFIDENT_MATCH' && (
-              <>
-                <p className="hint">
-                  This matches an existing PatientChain record ({identityResult.method}, score {identityResult.score}):{' '}
-                  <code>{identityResult.patientDID}</code>
-                </p>
-                <button className="btn btn-primary" onClick={() => handleLinkToExisting(identityResult.patientDID)} disabled={loading}>
-                  This is me — use existing identity
-                </button>
-              </>
-            )}
-            {identityResult.matchType === 'POSSIBLE_DUPLICATE' && (
-              <>
-                <p className="hint" style={{ color: 'var(--amber)' }}>
-                  Possible duplicate — this looks similar to {identityResult.candidates.length} existing record(s).
-                  A registrar should confirm before creating a new identity.
-                </p>
-                {identityResult.candidates.map((c) => (
-                  <div key={c.patientDID} className="data-row">
-                    <span className="k">{c.name} (score {c.score})</span>
-                    <button className="btn btn-ghost" onClick={() => handleLinkToExisting(c.patientDID)} disabled={loading}>
-                      This is me
-                    </button>
-                  </div>
-                ))}
-                <button className="btn btn-danger" style={{ marginTop: 8 }} onClick={handleRegisterAnyway} disabled={loading}>
-                  None of these are me — register as new
-                </button>
-              </>
-            )}
-          </div>
-        )}
 
         {patient && (
           <div style={{ marginTop: 14 }}>
@@ -287,6 +224,85 @@ export function PatientApp() {
           </div>
         )}
       </div>
+
+      {patient && (
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <span className="eyebrow">Off-chain, patient-asserted, never on-chain</span>
+              <h2>Link a facility</h2>
+            </div>
+          </div>
+          <p className="hint">
+            Already have a record at another hospital? Enter your hospital number and date of birth there and
+            we'll check it against that hospital's own records.
+          </p>
+
+          {facilityError && (
+            <p className="hint" style={{ color: 'var(--rust)' }}>
+              {facilityError}
+            </p>
+          )}
+
+          {!facilityMatch && (
+            <>
+              <div className="grid-2">
+                <div className="field">
+                  <label>Hospital ID</label>
+                  <input
+                    value={facilityHospitalID}
+                    onChange={(e) => setFacilityHospitalID(e.target.value)}
+                    placeholder="the hospital's ID, as its admin dashboard shows it"
+                  />
+                </div>
+                <div className="field">
+                  <label>Hospital number</label>
+                  <input value={facilityNumber} onChange={(e) => setFacilityNumber(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Date of birth</label>
+                  <input type="date" value={facilityDob} onChange={(e) => setFacilityDob(e.target.value)} />
+                </div>
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: 8 }}
+                onClick={handleLookupFacility}
+                disabled={loading || !facilityHospitalID || !facilityNumber || !facilityDob}
+              >
+                Look up
+              </button>
+            </>
+          )}
+
+          {facilityMatch && (
+            <div style={{ marginTop: 14, padding: 12, border: '1px solid var(--line)', borderRadius: 8 }}>
+              <p className="hint">We found a matching record at {facilityHospitalID}:</p>
+              <p style={{ fontWeight: 600, fontSize: 16 }}>{facilityMatch.name}</p>
+              <p className="hint">Is this you?</p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-primary" onClick={handleConfirmFacilityLink} disabled={loading}>
+                  Yes
+                </button>
+                <button className="btn btn-ghost" onClick={handleRejectFacilityMatch} disabled={loading}>
+                  No
+                </button>
+              </div>
+            </div>
+          )}
+
+          {linkedFacilities.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              {linkedFacilities.map((f) => (
+                <div className="data-row" key={f.hospitalID}>
+                  <span className="k">{f.hospitalID}</span>
+                  <span className="v">linked ({f.hospitalNumber})</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid-2">
         <div className="panel">

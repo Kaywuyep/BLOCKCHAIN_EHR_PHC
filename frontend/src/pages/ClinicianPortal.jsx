@@ -14,9 +14,9 @@ const SCOPE_OPTIONS = [
 const PURPOSE_OPTIONS = ['Treatment', 'Referral', 'Second Opinion'];
 
 export function ClinicianPortal() {
-  const [patientDID, setPatientDID] = useState('did:patientchain:demo-patient-1');
-  const [providerID, setProviderID] = useState('dr-adeyemi');
-  const [hospitalID, setHospitalID] = useState('HospitalA-Lagos');
+  const [patientDID, setPatientDID] = useState('');
+  const [providerID, setProviderID] = useState('');
+  const [hospitalID, setHospitalID] = useState('');
   const [purpose, setPurpose] = useState('Treatment');
   const [scope, setScope] = useState(
     Object.fromEntries(SCOPE_OPTIONS.map((o) => [o.key, o.defaultChecked]))
@@ -120,18 +120,23 @@ export function ClinicianPortal() {
         <div className="grid-2">
           <div className="field">
             <label>Patient DID</label>
-            <input value={patientDID} onChange={(e) => setPatientDID(e.target.value)} />
+            <input value={patientDID} onChange={(e) => setPatientDID(e.target.value)} placeholder="did:patientchain:..." />
           </div>
           <div className="field">
             <label>Your provider ID</label>
-            <input value={providerID} onChange={(e) => setProviderID(e.target.value)} />
+            <input
+              value={providerID}
+              onChange={(e) => setProviderID(e.target.value)}
+              placeholder="registered via POST /api/providers/register"
+            />
           </div>
           <div className="field">
-            <label>Hospital</label>
-            <select value={hospitalID} onChange={(e) => setHospitalID(e.target.value)}>
-              <option value="HospitalA-Lagos">HospitalA-Lagos</option>
-              <option value="HospitalB-Ibadan">HospitalB-Ibadan</option>
-            </select>
+            <label>Hospital ID</label>
+            <input
+              value={hospitalID}
+              onChange={(e) => setHospitalID(e.target.value)}
+              placeholder="the hospital's ID, as its admin dashboard shows it"
+            />
           </div>
           <div className="field">
             <label>Purpose of use</label>
@@ -241,7 +246,7 @@ export function ClinicianPortal() {
           )}
           {grant.status === 'PENDING' && (
             <p className="hint" style={{ marginTop: 10 }}>
-              Switch to the Patient App tab (same demo patient) to approve or revoke this request.
+              Switch to the Patient App tab (same patient DID) to approve or revoke this request.
             </p>
           )}
 

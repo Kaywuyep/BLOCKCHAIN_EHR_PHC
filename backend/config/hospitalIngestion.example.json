@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy this file to hospitalIngestion.json (gitignored, like .env) and fill in real facilities as you onboard them. Each key is the exact hospitalID string used everywhere else in the app (the free-text 'Hospital ID' field on the Patient App / Clinician Portal / Admin Dashboard, and the hospitalID passed to POST /api/providers/register).",
+
+  "example-hospital-fhir": {
+    "mode": "fhir-rest",
+    "_comment": "See docs/fhir-adapter-live-emr-guide.md -- no config fields defined here yet, that guide's Section 5 covers per-hospital FHIR config separately."
+  },
+
+  "example-hospital-manual": {
+    "mode": "manual",
+    "_comment": "No live integration at all -- staff use the Admin Dashboard's 'Hospital local patient roster' panel by hand (see docs/fhir-adapter-live-emr-guide.md Section 12, Option D)."
+  },
+
+  "general-hospital-langtang": {
+    "mode": "hl7",
+    "mllpPort": 5001,
+    "hl7Version": "2.5"
+  }
+
+}

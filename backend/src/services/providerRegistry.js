@@ -54,33 +54,8 @@ class ProviderRegistry {
   }
 }
 
+// Singleton -- starts with no providers registered. Register real staff via
+// POST /api/providers/register (see routes/providers.js).
 const providerRegistry = new ProviderRegistry();
 
-function seedDemoProviders() {
-  providerRegistry.register({
-    providerID: 'dr-adeyemi',
-    hospitalID: 'HospitalA-Lagos',
-    name: 'Dr. Adeyemi',
-    role: 'Physician',
-    department: 'Internal Medicine',
-    status: 'ACTIVE',
-  });
-  providerRegistry.register({
-    providerID: 'dr-bello',
-    hospitalID: 'HospitalA-Lagos',
-    name: 'Dr. Bello',
-    role: 'Psychiatrist',
-    department: 'Psychiatry',
-    status: 'ACTIVE',
-  });
-  providerRegistry.register({
-    providerID: 'dr-okafor',
-    hospitalID: 'HospitalB-Ibadan',
-    name: 'Dr. Okafor',
-    role: 'Physician',
-    department: 'Internal Medicine',
-    status: 'ACTIVE',
-  });
-}
-
-module.exports = { ProviderRegistry, providerRegistry, seedDemoProviders };
+module.exports = { ProviderRegistry, providerRegistry };

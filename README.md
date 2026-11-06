@@ -49,12 +49,35 @@ at it.
 **Prerequisites** (install these on your own machine — they can't be installed in a sandboxed dev
 environment):
 - Docker + Docker Compose
-- Fabric binaries: `curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/bootstrap.sh | bash -s -- 2.5.4 1.5.7`
+- Fabric binaries: `curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/bootstrap.sh | bash -s -- 2.5.16 1.5.17`
   (adds `cryptogen`, `configtxgen`, `peer` to `./bin`, add that to your `PATH`)
 - Go 1.21+ (for `go mod vendor` during chaincode packaging)
 
 ```bash
 cd network
+cd /home/katie/Desktop/BLOCKCHAIN_EHR_PHC/network
+
+curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/bootstrap.sh \
+  | bash -s -- 2.5.4 1.5.7
+
+export PATH="$PWD/bin:$PATH"
+
+./scripts/network-up.sh
+
+# Verify before rerunning:
+
+
+command -v cryptogen
+command -v configtxgen
+command -v peer
+
+
+# To make the PATH permanent:
+
+
+echo 'export PATH="/home/katie/Desktop/BLOCKCHAIN_EHR_PHC/network/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
 ./scripts/network-up.sh        # generates crypto material, starts orderer + 2 peers, creates the channel
 ./scripts/deployChaincode.sh   # packages, installs, approves, commits the chaincode
 
@@ -64,6 +87,33 @@ npm start
 
 cd ../frontend
 npm run dev
+npm run dev -- --host 0.0.0.0
+```
+
+add hospitals in the config file the check the are listening on assigned port and verify by sending an adt message to each port
+```bash
+ss -ltnp | grep -E ':(5001|5002)\b'
+
+### Hospital Langtang — port 5001
+
+
+printf '\x0bMSH|^~\\&|ADTAPP|LANGTANG|PATIENTCHAIN|PCH|20261009080000||ADT^A01|LANGTANG-001|P|2.5\rPID|1||LANGTANG-TEST-001||OKAFOR^ADA||19900412|F\rPV1|1|I|WARD^101^A\r\x1c\r' \
+| nc -q 1 127.0.0.1 5001 | tr '\r' '\n'
+
+
+### Hospital Wase — port 5002
+
+
+printf '\x0bMSH|^~\\&|ADTAPP|WASE|PATIENTCHAIN|PCH|20261009080500||ADT^A01|WASE-001|P|2.5\rPID|1||WASE-TEST-001||BELLO^CHIDI||19851103|M\rPV1|1|O|CLINIC^202^B\r\x1c\r' \
+| nc -q 1 127.0.0.1 5002 | tr '\r' '\n'
+
+```
+
+Then verify the records arrived under the correct hospital:
+
+``` bash
+curl http://localhost:6000/api/patients/local-records/general-hospital-langtang
+curl http://localhost:6000/api/patients/local-records/general-hospital-wase
 ```
 
 The frontend and every route are identical in both modes — only the ledger underneath changes. The header

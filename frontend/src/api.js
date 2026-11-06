@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
+// In development Vite proxies /api to the live backend on port 6000.
+// VITE_API_BASE remains available when the frontend is deployed separately.
+const BASE = import.meta.env.VITE_API_BASE || '/api';
 
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -19,12 +21,18 @@ export const api = {
 
   registerPatient: (data) => request('/patients/register', { method: 'POST', body: JSON.stringify(data) }),
   getPatient: (did) => request(`/patients/${encodeURIComponent(did)}`),
-  matchPatient: (params) => request(`/patients/match?${new URLSearchParams(params).toString()}`),
-  linkPatient: (did, data) =>
-    request(`/patients/${encodeURIComponent(did)}/link`, { method: 'POST', body: JSON.stringify(data) }),
+  linkFacility: (did, data) =>
+    request(`/patients/${encodeURIComponent(did)}/link-facility`, { method: 'POST', body: JSON.stringify(data) }),
+  confirmLink: (did, data) =>
+    request(`/patients/${encodeURIComponent(did)}/confirm-link`, { method: 'POST', body: JSON.stringify(data) }),
   registerReference: (did, data) =>
     request(`/patients/${encodeURIComponent(did)}/references`, { method: 'POST', body: JSON.stringify(data) }),
   getReferences: (did) => request(`/patients/${encodeURIComponent(did)}/references`),
+
+  addLocalPatientRecord: (hospitalID, data) =>
+    request(`/patients/local-records/${encodeURIComponent(hospitalID)}`, { method: 'POST', body: JSON.stringify(data) }),
+  getLocalPatientRecords: (hospitalID) => request(`/patients/local-records/${encodeURIComponent(hospitalID)}`),
+  getHospitalStatuses: () => request('/hospitals/status'),
 
   registerProvider: (data) => request('/providers/register', { method: 'POST', body: JSON.stringify(data) }),
   getProvidersForHospital: (hospitalID) => request(`/providers/hospital/${encodeURIComponent(hospitalID)}`),

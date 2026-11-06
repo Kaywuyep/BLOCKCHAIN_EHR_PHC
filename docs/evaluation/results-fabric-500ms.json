@@ -1,0 +1,559 @@
+{
+  "run": "B2536E",
+  "startedAt": "2026-11-06T10:41:43.571Z",
+  "base": "http://localhost:4600",
+  "ledgerMode": "fabric",
+  "patients": 10,
+  "hl7Ingestion": {
+    "hospital-a": {
+      "messagesSent": 30,
+      "acceptedAA": 30,
+      "rejectedAE": 0,
+      "otherAck": 0,
+      "acceptedByTrigger": {
+        "A01": 10,
+        "A08": 10,
+        "A03": 10
+      },
+      "ackLatencyMs": {
+        "n": 30,
+        "mean": 1.9,
+        "median": 1.8,
+        "p95": 3.2,
+        "min": 1,
+        "max": 8.3
+      },
+      "malformedMessagesAck": [
+        "AE",
+        "AE"
+      ],
+      "patientsOnRoster": 10,
+      "patientsExpected": 10
+    },
+    "hospital-b": {
+      "messagesSent": 30,
+      "acceptedAA": 30,
+      "rejectedAE": 0,
+      "otherAck": 0,
+      "acceptedByTrigger": {
+        "A01": 10,
+        "A08": 10,
+        "A03": 10
+      },
+      "ackLatencyMs": {
+        "n": 30,
+        "mean": 1.8,
+        "median": 1.8,
+        "p95": 2.3,
+        "min": 1.3,
+        "max": 3.3
+      },
+      "malformedMessagesAck": [
+        "AE",
+        "AE"
+      ],
+      "patientsOnRoster": 10,
+      "patientsExpected": 10
+    }
+  },
+  "crossFacility": {
+    "directions": {
+      "B->A": {
+        "attempts": 10,
+        "resolvedOk": 10,
+        "revokedThenRefused": 10,
+        "revokeLeaks": 0,
+        "successRate": 1
+      },
+      "A->B": {
+        "attempts": 10,
+        "resolvedOk": 10,
+        "revokedThenRefused": 10,
+        "revokeLeaks": 0,
+        "successRate": 1
+      }
+    },
+    "accuracy": {
+      "checked": 20,
+      "correct": 20,
+      "mismatches": []
+    },
+    "timingsMs": {
+      "register": {
+        "n": 10,
+        "mean": 579.7,
+        "median": 565.3,
+        "p95": 709.1,
+        "min": 560.9,
+        "max": 709.1
+      },
+      "registerReference": {
+        "n": 20,
+        "mean": 560.5,
+        "median": 560.2,
+        "p95": 576.3,
+        "min": 556.6,
+        "max": 576.3
+      },
+      "linkLookup": {
+        "n": 10,
+        "mean": 4.8,
+        "median": 4.9,
+        "p95": 5.3,
+        "min": 3.8,
+        "max": 5.3
+      },
+      "linkConfirm": {
+        "n": 10,
+        "mean": 4.3,
+        "median": 4.2,
+        "p95": 7.8,
+        "min": 2.6,
+        "max": 7.8
+      },
+      "request": {
+        "n": 20,
+        "mean": 555.8,
+        "median": 555.7,
+        "p95": 560.3,
+        "min": 551.2,
+        "max": 560.3
+      },
+      "grant": {
+        "n": 20,
+        "mean": 1095.3,
+        "median": 1094.7,
+        "p95": 1102.5,
+        "min": 1091,
+        "max": 1102.5
+      },
+      "authorisationLatency": {
+        "n": 20,
+        "mean": 1651.9,
+        "median": 1651.1,
+        "p95": 1665.3,
+        "min": 1646.8,
+        "max": 1665.3
+      },
+      "resolve": {
+        "n": 20,
+        "mean": 555.7,
+        "median": 555.3,
+        "p95": 572.5,
+        "min": 552.3,
+        "max": 572.5
+      },
+      "revoke": {
+        "n": 20,
+        "mean": 1095.3,
+        "median": 1095.9,
+        "p95": 1101.2,
+        "min": 1091.2,
+        "max": 1101.2
+      }
+    },
+    "objectSizesBytes": {
+      "reference": {
+        "n": 20,
+        "mean": 471,
+        "median": 471,
+        "p95": 471,
+        "min": 471,
+        "max": 471
+      },
+      "grant": {
+        "n": 20,
+        "mean": 420.8,
+        "median": 421,
+        "p95": 421,
+        "min": 419,
+        "max": 421
+      },
+      "audit": {
+        "n": 9,
+        "mean": 325.6,
+        "median": 328,
+        "p95": 338,
+        "min": 316,
+        "max": 338
+      },
+      "fhirBundle": {
+        "n": 20,
+        "mean": 1598,
+        "median": 1598,
+        "p95": 1598,
+        "min": 1598,
+        "max": 1598
+      }
+    },
+    "negativeChecks": {
+      "outOfScopeResourceType": 403,
+      "purposeMismatch": 403,
+      "wrongHospital": 403,
+      "unregisteredProvider": 403,
+      "pendingNotYetGranted": 403,
+      "linkWrongDob": {
+        "status": 404,
+        "body": {
+          "error": "No matching record found"
+        }
+      },
+      "linkWrongNumber": {
+        "status": 404,
+        "body": {
+          "error": "No matching record found"
+        }
+      },
+      "linkResponsesIndistinguishable": true
+    }
+  },
+  "breakGlass": {
+    "events": 5,
+    "allActiveImmediately": true,
+    "allFlaggedForReview": true,
+    "pendingReviewBefore": 5,
+    "pendingReviewAfter": 0,
+    "auditHasBreakGlassEntry": true,
+    "auditHasReviewEntry": true,
+    "latencyMs": {
+      "n": 5,
+      "mean": 1094.2,
+      "median": 1092.5,
+      "p95": 1102.7,
+      "min": 1091.4,
+      "max": 1102.7
+    }
+  },
+  "auditIntegrity": {
+    "attempts": {
+      "deleteFunction": {
+        "rejected": true,
+        "message": "Error: endorsement failure during invoke. response: status:500 message:\"Function DeleteAuditEntry not found in contract AuditLogContract\""
+      },
+      "updateFunction": {
+        "rejected": true,
+        "message": "Error: endorsement failure during invoke. response: status:500 message:\"Function UpdateAuditEntry not found in contract AuditLogContract\""
+      },
+      "overwriteExistingEntry": {
+        "rejected": true,
+        "message": "Error: endorsement failure during invoke. response: status:500 message:\"audit entry 14c3d350-3067-440e-8f81-bc649ff60303 already exists\""
+      }
+    },
+    "allRejected": true,
+    "entriesBefore": 11,
+    "entriesAfter": 11,
+    "trailUnchanged": true
+  },
+  "offlineSync": {
+    "actionsQueued": 15,
+    "allAcceptedAs202WhileOffline": true,
+    "queueingTimeMs": 70,
+    "reconciled": 15,
+    "synced": 15,
+    "failed": 0,
+    "reconcileTimeMs": 10971,
+    "finalGrantStates": [
+      "REVOKED",
+      "REVOKED",
+      "REVOKED",
+      "REVOKED",
+      "REVOKED"
+    ],
+    "auditEntriesFlaggedQueuedOffline": 5,
+    "duplicateAuditEntries": 0
+  },
+  "batching": [
+    {
+      "concurrentSubmissions": 1,
+      "succeeded": 1,
+      "blocksCut": 1,
+      "txPerBlock": 1,
+      "wallClockMs": 563,
+      "meanLatencyPerRequestMs": 563,
+      "amortisedMsPerAction": 563.4,
+      "throughputTps": 1.78
+    },
+    {
+      "concurrentSubmissions": 2,
+      "succeeded": 2,
+      "blocksCut": 1,
+      "txPerBlock": 2,
+      "wallClockMs": 571,
+      "meanLatencyPerRequestMs": 568,
+      "amortisedMsPerAction": 285.4,
+      "throughputTps": 3.5
+    },
+    {
+      "concurrentSubmissions": 5,
+      "succeeded": 5,
+      "blocksCut": 1,
+      "txPerBlock": 5,
+      "wallClockMs": 583,
+      "meanLatencyPerRequestMs": 580,
+      "amortisedMsPerAction": 116.6,
+      "throughputTps": 8.58
+    },
+    {
+      "concurrentSubmissions": 10,
+      "succeeded": 10,
+      "blocksCut": 1,
+      "txPerBlock": 10,
+      "wallClockMs": 629,
+      "meanLatencyPerRequestMs": 621,
+      "amortisedMsPerAction": 62.9,
+      "throughputTps": 15.9
+    },
+    {
+      "concurrentSubmissions": 20,
+      "succeeded": 20,
+      "blocksCut": 1,
+      "txPerBlock": 20,
+      "wallClockMs": 679,
+      "meanLatencyPerRequestMs": 670,
+      "amortisedMsPerAction": 34,
+      "throughputTps": 29.44
+    },
+    {
+      "concurrentSubmissions": 50,
+      "succeeded": 50,
+      "blocksCut": 1,
+      "txPerBlock": 50,
+      "wallClockMs": 830,
+      "meanLatencyPerRequestMs": 809,
+      "amortisedMsPerAction": 16.6,
+      "throughputTps": 60.26
+    }
+  ],
+  "costSummary": {
+    "params": {
+      "k": 2,
+      "Ce": 12,
+      "Co": 40,
+      "Cv": 6,
+      "b": 10
+    },
+    "counters": {
+      "audit": 78,
+      "breakglass": 5,
+      "grant": 86,
+      "reference": 20,
+      "registration": 98
+    },
+    "rates": {
+      "lambda_r": 0.16320402134708598,
+      "lambda_g": 0.7017772917924697,
+      "lambda_a": 0.6364956832536354
+    },
+    "actionCostAtCurrentBatch": 22,
+    "actionCostCurve": [
+      {
+        "b": 1,
+        "cost": 58
+      },
+      {
+        "b": 2,
+        "cost": 38
+      },
+      {
+        "b": 3,
+        "cost": 31.333
+      },
+      {
+        "b": 4,
+        "cost": 28
+      },
+      {
+        "b": 5,
+        "cost": 26
+      },
+      {
+        "b": 6,
+        "cost": 24.667
+      },
+      {
+        "b": 7,
+        "cost": 23.714
+      },
+      {
+        "b": 8,
+        "cost": 23
+      },
+      {
+        "b": 9,
+        "cost": 22.444
+      },
+      {
+        "b": 10,
+        "cost": 22
+      },
+      {
+        "b": 11,
+        "cost": 21.636
+      },
+      {
+        "b": 12,
+        "cost": 21.333
+      },
+      {
+        "b": 13,
+        "cost": 21.077
+      },
+      {
+        "b": 14,
+        "cost": 20.857
+      },
+      {
+        "b": 15,
+        "cost": 20.667
+      },
+      {
+        "b": 16,
+        "cost": 20.5
+      },
+      {
+        "b": 17,
+        "cost": 20.353
+      },
+      {
+        "b": 18,
+        "cost": 20.222
+      },
+      {
+        "b": 19,
+        "cost": 20.105
+      },
+      {
+        "b": 20,
+        "cost": 20
+      },
+      {
+        "b": 21,
+        "cost": 19.905
+      },
+      {
+        "b": 22,
+        "cost": 19.818
+      },
+      {
+        "b": 23,
+        "cost": 19.739
+      },
+      {
+        "b": 24,
+        "cost": 19.667
+      },
+      {
+        "b": 25,
+        "cost": 19.6
+      },
+      {
+        "b": 26,
+        "cost": 19.538
+      },
+      {
+        "b": 27,
+        "cost": 19.481
+      },
+      {
+        "b": 28,
+        "cost": 19.429
+      },
+      {
+        "b": 29,
+        "cost": 19.379
+      },
+      {
+        "b": 30,
+        "cost": 19.333
+      },
+      {
+        "b": 31,
+        "cost": 19.29
+      },
+      {
+        "b": 32,
+        "cost": 19.25
+      },
+      {
+        "b": 33,
+        "cost": 19.212
+      },
+      {
+        "b": 34,
+        "cost": 19.176
+      },
+      {
+        "b": 35,
+        "cost": 19.143
+      },
+      {
+        "b": 36,
+        "cost": 19.111
+      },
+      {
+        "b": 37,
+        "cost": 19.081
+      },
+      {
+        "b": 38,
+        "cost": 19.053
+      },
+      {
+        "b": 39,
+        "cost": 19.026
+      },
+      {
+        "b": 40,
+        "cost": 19
+      },
+      {
+        "b": 41,
+        "cost": 18.976
+      },
+      {
+        "b": 42,
+        "cost": 18.952
+      },
+      {
+        "b": 43,
+        "cost": 18.93
+      },
+      {
+        "b": 44,
+        "cost": 18.909
+      },
+      {
+        "b": 45,
+        "cost": 18.889
+      },
+      {
+        "b": 46,
+        "cost": 18.87
+      },
+      {
+        "b": 47,
+        "cost": 18.851
+      },
+      {
+        "b": 48,
+        "cost": 18.833
+      },
+      {
+        "b": 49,
+        "cost": 18.816
+      },
+      {
+        "b": 50,
+        "cost": 18.8
+      }
+    ],
+    "ledgerRate": 33.032,
+    "ledgerGrowth": {
+      "bytesPerSecond": 371.13,
+      "baselineBytesPerSecondIfFullRecordOnChain": 7715.31,
+      "reductionFactor": 20.8
+    }
+  },
+  "finalBlockHeight": 209,
+  "finishedAt": "2026-11-06T10:43:41.821Z"
+}

@@ -7,15 +7,18 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js",
+    "test:hl7-synthetic": "node scripts/sendSyntheticAdt.js"
   },
   "dependencies": {
-    "@hyperledger/fabric-gateway": "^1.4.0",
     "@grpc/grpc-js": "^1.10.9",
+    "@hyperledger/fabric-gateway": "^1.4.0",
     "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "node-hl7-client": "^4.1.1",
+    "node-hl7-server": "^4.1.1",
     "uuid": "^9.0.1"
   }
 }

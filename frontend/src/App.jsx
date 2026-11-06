@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
+import { Routes, Route, Navigate, NavLink, Link } from 'react-router-dom';
 import './tokens.css';
 import './shell.css';
+import { Landing } from './pages/Landing';
 import { PatientApp } from './pages/PatientApp';
 import { ClinicianPortal } from './pages/ClinicianPortal';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { api } from './api';
 
 const TABS = [
-  { id: 'patient', label: 'Patient App', component: PatientApp },
-  { id: 'clinician', label: 'Clinician Portal', component: ClinicianPortal },
-  { id: 'admin', label: 'Admin Dashboard', component: AdminDashboard },
+  { path: '/patient', label: 'Patient App' },
+  { path: '/clinician', label: 'Clinician Portal' },
+  { path: '/admin', label: 'Admin Dashboard' },
 ];
 
 export default function App() {
-  const [active, setActive] = useState('patient');
   const [health, setHealth] = useState(null);
 
   useEffect(() => {
@@ -23,16 +24,14 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  const ActiveComponent = TABS.find((t) => t.id === active)?.component ?? PatientApp;
-
   return (
     <div className="shell">
       <header className="shell-header">
-        <div className="shell-title">
+        <Link to="/" className="shell-title">
           <span className="mark" />
           <h1>PatientChain</h1>
           <span className="subtitle">Blockchain-based patient-controlled access &amp; reference system</span>
-        </div>
+        </Link>
         <div className="shell-status">
           {health && (
             <>
@@ -51,18 +50,20 @@ export default function App() {
 
       <nav className="tabs">
         {TABS.map((t) => (
-          <button
-            key={t.id}
-            className={`tab ${active === t.id ? 'active' : ''}`}
-            onClick={() => setActive(t.id)}
-          >
+          <NavLink key={t.path} to={t.path} className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
             {t.label}
-          </button>
+          </NavLink>
         ))}
       </nav>
 
       <main className="main">
-        <ActiveComponent />
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/patient" element={<PatientApp />} />
+          <Route path="/clinician" element={<ClinicianPortal />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
     </div>
   );

@@ -5,31 +5,42 @@ import {
 import { api } from '../api';
 import { LedgerStrip } from '../components/LedgerStrip';
 
+const EMPTY_ROSTER_FORM = { hospitalNumber: '', name: '', dob: '' };
+
 export function AdminDashboard() {
   const [cost, setCost] = useState(null);
   const [batchSize, setBatchSize] = useState(10);
   const [events, setEvents] = useState([]);
   const [syncStatus, setSyncStatus] = useState(null);
+  const [hospitalStatuses, setHospitalStatuses] = useState([]);
   const [queue, setQueue] = useState([]);
   const [pendingReviews, setPendingReviews] = useState([]);
   const [reviewNotes, setReviewNotes] = useState({});
+  const [reviewerID, setReviewerID] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const [rosterHospitalID, setRosterHospitalID] = useState('');
+  const [roster, setRoster] = useState([]);
+  const [rosterForm, setRosterForm] = useState(EMPTY_ROSTER_FORM);
+  const [rosterError, setRosterError] = useState(null);
+
   async function refresh() {
     try {
-      const [c, e, s, q, pr] = await Promise.all([
+      const [c, e, s, q, pr, hs] = await Promise.all([
         api.getCostSummary({ b: batchSize }),
         api.getRecentEvents(),
         api.getSyncStatus(),
         api.getSyncQueue(),
         api.getPendingBreakGlass(),
+        api.getHospitalStatuses(),
       ]);
       setCost(c);
       setEvents(e);
       setSyncStatus(s);
       setQueue(q);
       setPendingReviews(pr);
+      setHospitalStatuses(hs);
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -40,7 +51,7 @@ export function AdminDashboard() {
     setLoading(true);
     try {
       await api.reviewBreakGlass(grantID, {
-        reviewerID: 'hospital-admin',
+        reviewerID: reviewerID || 'unspecified-reviewer',
         notes: reviewNotes[grantID] || 'Reviewed via Admin Dashboard',
       });
       await refresh();
@@ -57,6 +68,30 @@ export function AdminDashboard() {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchSize]);
+
+  async function loadRoster(hospitalID) {
+    if (!hospitalID) return;
+    setRosterError(null);
+    try {
+      setRoster(await api.getLocalPatientRecords(hospitalID));
+    } catch (e) {
+      setRosterError(e.message);
+    }
+  }
+
+  async function handleAddRosterRecord() {
+    setLoading(true);
+    setRosterError(null);
+    try {
+      await api.addLocalPatientRecord(rosterHospitalID, rosterForm);
+      setRosterForm(EMPTY_ROSTER_FORM);
+      await loadRoster(rosterHospitalID);
+    } catch (e) {
+      setRosterError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function toggleConnectivity() {
     setLoading(true);
@@ -80,6 +115,126 @@ export function AdminDashboard() {
   return (
     <div>
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">Off-chain, never on-chain</span>
+            <h2>Hospital local patient roster</h2>
+          </div>
+        </div>
+        <p className="hint">
+          The demographic records a hospital's own EMR already holds, keyed by its own hospital number. This is
+          what a patient's hospital number + date of birth get checked against on the Patient App's "Link a
+          facility" flow — add an entry here to make a real hospital number linkable.
+        </p>
+        {rosterError && (
+          <p className="hint" style={{ color: 'var(--rust)' }}>
+            {rosterError}
+          </p>
+        )}
+        <div className="grid-2">
+          <div className="field">
+            <label>Hospital ID</label>
+            <input
+              value={rosterHospitalID}
+              onChange={(e) => setRosterHospitalID(e.target.value)}
+              placeholder="e.g. this hospital's org/FHIR-endpoint ID"
+            />
+          </div>
+          <div className="field">
+            <label>Hospital number</label>
+            <input
+              value={rosterForm.hospitalNumber}
+              onChange={(e) => setRosterForm((f) => ({ ...f, hospitalNumber: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label>Full name</label>
+            <input value={rosterForm.name} onChange={(e) => setRosterForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div className="field">
+            <label>Date of birth</label>
+            <input
+              type="date"
+              value={rosterForm.dob}
+              onChange={(e) => setRosterForm((f) => ({ ...f, dob: e.target.value }))}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleAddRosterRecord}
+            disabled={loading || !rosterHospitalID || !rosterForm.hospitalNumber || !rosterForm.name || !rosterForm.dob}
+          >
+            Add record
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => loadRoster(rosterHospitalID)}
+            disabled={!rosterHospitalID}
+          >
+            View roster
+          </button>
+        </div>
+
+        {roster.length === 0 && (
+          <p className="hint" style={{ marginTop: 14 }}>
+            {rosterHospitalID ? `No local records at ${rosterHospitalID} yet.` : 'Enter a hospital ID above to add or view its roster.'}
+          </p>
+        )}
+        {roster.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            {roster.map((r) => (
+              <div className="data-row" key={r.hospitalNumber}>
+                <span className="k">{r.name} — {r.hospitalNumber}</span>
+                <span className="v">DOB {r.dob}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <span className="eyebrow">HL7 / MLLP integration</span>
+            <h2>Connected hospitals</h2>
+          </div>
+        </div>
+        <p className="hint">
+          Listening means the hospital endpoint is ready. An ADT message count and last-message time confirm that
+          the hospital has actually sent data. MLLP does not keep a permanent connection open.
+        </p>
+        {hospitalStatuses.length === 0 && (
+          <p className="hint">No hospitals are configured for ingestion.</p>
+        )}
+        {hospitalStatuses.map((hospital) => {
+          const statusColor = hospital.status === 'listening' ? 'var(--sage)' : 'var(--amber)';
+          const lastMessage = hospital.lastMessageAt
+            ? new Date(hospital.lastMessageAt).toLocaleString()
+            : 'No ADT received yet';
+          return (
+            <div className="data-row" key={hospital.hospitalID}>
+              <div>
+                <div className="k">{hospital.hospitalID}</div>
+                <div className="hint">
+                  {hospital.mode === 'hl7' ? `MLLP port ${hospital.mllpPort}` : hospital.mode}
+                  {' · '}
+                  {hospital.messagesReceived} message{hospital.messagesReceived === 1 ? '' : 's'}
+                  {' · Last: '}
+                  {lastMessage}
+                </div>
+              </div>
+              <div className="v" style={{ color: statusColor }}>
+                {hospital.status === 'listening' ? 'Listening' : hospital.status}
+                {hospital.messagesAccepted > 0 && ` · ${hospital.messagesAccepted} accepted`}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="panel">
         <div className="panel-head">
@@ -202,6 +357,10 @@ export function AdminDashboard() {
             <span className="eyebrow">Section 35.1</span>
             <h2>Break-glass access — review queue</h2>
           </div>
+        </div>
+        <div className="field" style={{ maxWidth: 280 }}>
+          <label>Reviewing as (your reviewer ID)</label>
+          <input value={reviewerID} onChange={(e) => setReviewerID(e.target.value)} />
         </div>
         {pendingReviews.length === 0 && <p className="hint">No emergency accesses awaiting review.</p>}
         {pendingReviews.map((g) => (

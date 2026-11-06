@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hyperledger/fabric-contract-api-go/v2/contractapi"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // AuditLogContract records every access event immutably. No function in
@@ -34,8 +34,8 @@ type AuditEntry struct {
 	EventType  AuditEventType `json:"eventType"`
 	ActorID    string         `json:"actorID"` // provider/hospital identity that triggered the event
 	HospitalID string         `json:"hospitalID"`
-	Timestamp  time.Time      `json:"timestamp"`
-	Detail     string         `json:"detail,omitempty"`
+	Timestamp  string         `json:"timestamp"`
+	Detail     string         `json:"detail,omitempty" metadata:"detail,optional"`
 	// QueuedOffline marks entries that were generated while the client was
 	// disconnected and only reached the ledger after reconnection
 	// (Section 3.6). The audit trail still reflects the true event
@@ -78,7 +78,7 @@ func (c *AuditLogContract) WriteAuditEntry(ctx contractapi.TransactionContextInt
 		EventType:     AuditEventType(eventType),
 		ActorID:       actorID,
 		HospitalID:    hospitalID,
-		Timestamp:     ts,
+		Timestamp:     formatTS(ts),
 		Detail:        detail,
 		QueuedOffline: queuedOffline,
 	}

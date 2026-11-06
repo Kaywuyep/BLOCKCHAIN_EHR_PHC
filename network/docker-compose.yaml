@@ -17,7 +17,7 @@ networks:
 services:
   orderer.patientchain.local:
     container_name: orderer.patientchain.local
-    image: hyperledger/fabric-orderer:2.5
+    image: hyperledger/fabric-orderer:2.5.16
     environment:
       - FABRIC_LOGGING_SPEC=INFO
       - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
@@ -50,10 +50,11 @@ services:
 
   peer0.hospitala.patientchain.local:
     container_name: peer0.hospitala.patientchain.local
-    image: hyperledger/fabric-peer:2.5
+    image: hyperledger/fabric-peer:2.5.16
     environment:
       - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=patientchain
+      - FABRIC_CFG_PATH=/etc/hyperledger/fabric/config
       - FABRIC_LOGGING_SPEC=INFO
       - CORE_PEER_TLS_ENABLED=true
       - CORE_PEER_PROFILE_ENABLED=false
@@ -77,6 +78,7 @@ services:
       - /var/run/docker.sock:/host/var/run/docker.sock
       - ./crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/msp:/etc/hyperledger/fabric/msp
       - ./crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls:/etc/hyperledger/fabric/tls
+      - ./config:/etc/hyperledger/fabric/config:ro
       - peer0.hospitala.patientchain.local:/var/hyperledger/production
     ports:
       - "7051:7051"
@@ -87,10 +89,11 @@ services:
 
   peer0.hospitalb.patientchain.local:
     container_name: peer0.hospitalb.patientchain.local
-    image: hyperledger/fabric-peer:2.5
+    image: hyperledger/fabric-peer:2.5.16
     environment:
       - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
       - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=patientchain
+      - FABRIC_CFG_PATH=/etc/hyperledger/fabric/config
       - FABRIC_LOGGING_SPEC=INFO
       - CORE_PEER_TLS_ENABLED=true
       - CORE_PEER_PROFILE_ENABLED=false
@@ -113,6 +116,7 @@ services:
       - /var/run/docker.sock:/host/var/run/docker.sock
       - ./crypto-config/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/msp:/etc/hyperledger/fabric/msp
       - ./crypto-config/peerOrganizations/hospitalb.patientchain.local/peers/peer0.hospitalb.patientchain.local/tls:/etc/hyperledger/fabric/tls
+      - ./config:/etc/hyperledger/fabric/config:ro
       - peer0.hospitalb.patientchain.local:/var/hyperledger/production
     ports:
       - "9051:9051"
@@ -123,7 +127,7 @@ services:
 
   cli:
     container_name: cli
-    image: hyperledger/fabric-tools:2.5
+    image: hyperledger/fabric-tools:2.5.16
     tty: true
     stdin_open: true
     environment:
