@@ -119,6 +119,22 @@ curl http://localhost:6000/api/patients/local-records/general-hospital-wase
 The frontend and every route are identical in both modes — only the ledger underneath changes. The header
 badge in the app shows which mode is active (`ledger: simulated` / `ledger: fabric`).
 
+## Security and production deployment
+
+Both modes above run with `AUTH_MODE=off` by default: no login, every request acts as a superuser, so the
+demo and the Chapter 5 evaluation script work unchanged. To try sign-in and role-based access locally, set
+`AUTH_MODE=local` and `AUTH_JWT_SECRET` (32+ characters) in `backend/.env`. The app then shows a
+development sign-in form (patient / clinician / hospital admin / system admin).
+
+With `NODE_ENV=production` the backend refuses to start until it has a safe configuration: Fabric ledger,
+OIDC login, encryption keys, a CORS allowlist, HTTPS, and TLS or a VPN for HL7. See
+`backend/.env.production.example`, `deploy/docker-compose.prod.yml`, and the checklist in
+`docs/production_ready.md`. Operations and governance runbooks are in `docs/operations/` and
+`docs/governance/`.
+
+The frontend covers itself with white noise when a screen capture is likely: when the window loses focus,
+on screenshot shortcuts, and when printing. Set `VITE_SCREEN_SHIELD=off` to take documentation screenshots.
+
 ## Mapping to the paper
 
 | Paper section | Where it lives |
@@ -136,8 +152,9 @@ badge in the app shows which mode is active (`ledger: simulated` / `ledger: fabr
 - The frontend is a **web app**, not the React Native + PWA mobile app described in Section 3.4 — same
   component logic, different shell. Porting `frontend/src` into a React Native project is straightforward
   since the API layer (`api.js`) is framework-agnostic.
-- The FHIR Adapter (`fhirAdapter.js`) simulates each hospital's database in memory rather than integrating
-  a real FHIR R4 server — this is the seam you'd replace with an actual HL7 FHIR API client per Section 3.9.
+- The FHIR Adapter (`fhirAdapter.js`) keeps each hospital's data in an encrypted local SQLite store rather
+  than integrating a real FHIR R4 server — this is the seam you'd replace with an actual HL7 FHIR API client
+  per Section 3.9.
 - `getRecentEvents()` in `fabricLedgerService.js` is a no-op; a production build should subscribe to Fabric's
   chaincode event stream (`network.getChaincodeEvents`) rather than relying on the simulator's in-memory log.
 - The cost-model parameters (`Ce`, `Co`, `Cv` in `costModel.js`) are illustrative defaults, exactly as Section
