@@ -1,0 +1,83 @@
+# One hospital's PatientChain application stack: backend, frontend, and a
+# scheduled backup. The hospital's Fabric peer runs separately (see
+# docs/operations/fabric-production.md); TLS for the web app is terminated
+# by the hospital's load balancer or reverse proxy in front of `frontend`.
+#
+#   cp backend/.env.production.example deploy/backend.env   # fill it in
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#
+# Secrets (Fabric client cert/key or HSM config, MLLP TLS, OIDC) are mounted
+# read-only from ./secrets, which must be owned by root and mode 0700.
+
+services:
+  backend:
+    build: ../backend
+    env_file: backend.env
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /var/lib/patientchain
+      BACKUP_DIR: /var/backups/patientchain
+      HOSPITAL_INGESTION_CONFIG: /app/config/hospitalIngestion.json
+    volumes:
+      - patientchain-data:/var/lib/patientchain
+      - patientchain-backups:/var/backups/patientchain
+      - ./hospitalIngestion.json:/app/config/hospitalIngestion.json:ro
+      - ./secrets:/run/secrets:ro
+    ports:
+      # MLLP from the hospital interface engine only: bind to the VPN /
+      # private interface address, never 0.0.0.0 on a public host.
+      - "${MLLP_BIND_ADDRESS:-127.0.0.1}:5001:5001"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "10" }
+    networks: [internal]
+
+  frontend:
+    build: ../frontend
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [internal]
+
+  # Verified backup every 15 minutes, keeping 48 hours (192 copies). Ship $BACKUP_DIR off-site
+  # (see docs/operations/runbook.md); the files are field-encrypted.
+  backup:
+    build: ../backend
+    env_file: backend.env
+    environment:
+      DATA_DIR: /var/lib/patientchain
+      BACKUP_DIR: /var/backups/patientchain
+    volumes:
+      # read-write: SQLite in WAL mode needs its -shm file even to read
+      - patientchain-data:/var/lib/patientchain
+      - patientchain-backups:/var/backups/patientchain
+    entrypoint: ["/bin/sh", "-c", "while true; do node scripts/backup.js --keep 192; sleep 900; done"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [internal]
+
+volumes:
+  patientchain-data:
+  patientchain-backups:
+
+networks:
+  internal:

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, to catch newly published vulnerabilities
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: backend/package-lock.json }
+      - run: npm ci
+      - run: npm test
+      - name: Dependency vulnerabilities
+        run: npm audit --audit-level=moderate
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: cd ../backend && npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Dependency vulnerabilities
+        run: npm audit --audit-level=moderate
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  chaincode:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: chaincode } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: chaincode/go.mod }
+      - run: go vet ./...
+      - run: go test ./...
+      # Known open item (docs/production_ready.md, section 5): the chaincode
+      # pins grpc v1.59 / x/net v0.17 because the Fabric 2.5.4 chaincode
+      # builder (fabric-ccenv) ships Go 1.20. Fixing it needs a Fabric
+      # upgrade first; until then this reports without failing the build.
+      - name: Go vulnerabilities
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
