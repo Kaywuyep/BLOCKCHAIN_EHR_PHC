@@ -2,8 +2,9 @@
 
 const express = require('express');
 const { randomUUID } = require('crypto');
+const { ROLES, hasRole, actsForHospital, isPatientSelf, deny } = require('../auth/policy');
 
-function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
+function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore = null) {
   const router = express.Router();
 
   // ledger.getPatient() throws (synchronously, in simulated mode; via a
@@ -28,9 +29,28 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   // patient already has at some *other* hospital is a separate,
   // patient-asserted step -- see POST /:did/link-facility below.
   router.post('/register', async (req, res) => {
+    const user = req.user;
+    const asPatient = !user.superuser && user.roles.includes(ROLES.PATIENT);
+    if (!hasRole(user, ROLES.PATIENT, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) {
+      return deny(res, 'requires role: patient, hospital_admin or system_admin');
+    }
+    if (asPatient) {
+      // A patient registers only themselves: they may not claim an existing
+      // DID that isn't already bound to their account, and may not attach
+      // a hospital number directly -- that goes through the verified
+      // link-facility flow.
+      if (req.body.patientDID && req.body.patientDID !== user.patientDID) {
+        return deny(res, 'a patient can only register their own DID');
+      }
+      if (req.body.mrn || req.body.hospitalID) {
+        return deny(res, 'patients link a hospital record through link-facility, not at registration');
+      }
+    } else if (req.body.hospitalID && !actsForHospital(user, req.body.hospitalID, ROLES.HOSPITAL_ADMIN)) {
+      return deny(res, 'hospital staff can only register patients at their own hospital');
+    }
     try {
       const ledger = await ledgerPromise;
-      let patientDID = req.body.patientDID;
+      let patientDID = asPatient ? user.patientDID || undefined : req.body.patientDID;
 
       let patient;
       const alreadyRegistered = await tryGetPatient(ledger, patientDID);
@@ -42,6 +62,7 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
         const publicKey = req.body.publicKey || `pubkey-${randomUUID().slice(0, 12)}`;
         patient = await ledger.registerPatient({ patientDID, publicKey });
       }
+      if (asPatient && identityStore) identityStore.bind(user.sub, patientDID);
 
       const response = { patient };
       if (req.body.hospitalID) {
@@ -61,6 +82,9 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   // PatientChain identity operation -- nothing here ever touches the
   // ledger. See the Admin Dashboard's "Hospital local patient roster" panel.
   router.post('/local-records/:hospitalID', (req, res) => {
+    if (!actsForHospital(req.user, req.params.hospitalID, ROLES.HOSPITAL_ADMIN, ROLES.HL7_INTERFACE)) {
+      return deny(res, 'only this hospital\'s staff or interface engine can add to its roster');
+    }
     try {
       const { hospitalNumber, name, dob } = req.body;
       if (!hospitalNumber || !name || !dob) {
@@ -74,6 +98,9 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   });
 
   router.get('/local-records/:hospitalID', (req, res) => {
+    if (!actsForHospital(req.user, req.params.hospitalID, ROLES.HOSPITAL_ADMIN)) {
+      return deny(res, 'only this hospital\'s admins can view its roster');
+    }
     res.json(fhirAdapter.listLocalPatientRecords(req.params.hospitalID));
   });
 
@@ -85,6 +112,7 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   // indistinguishable) returns a generic 404, and repeated attempts are
   // rate-limited per patient as a second layer against enumeration.
   router.post('/:did/link-facility', (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did)) return deny(res, 'patients can only link facilities to their own DID');
     try {
       const { hospitalID, hospitalNumber, dateOfBirth } = req.body;
       if (!hospitalID || !hospitalNumber || !dateOfBirth) {
@@ -105,6 +133,7 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   // <-> hospital-number mapping locally via the FHIR Adapter -- never
   // on-chain.
   router.post('/:did/confirm-link', (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did)) return deny(res, 'patients can only link facilities to their own DID');
     try {
       const { hospitalID, hospitalNumber } = req.body;
       if (!hospitalID || !hospitalNumber) {
@@ -118,6 +147,9 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   });
 
   router.get('/:did', async (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did) && !hasRole(req.user, ROLES.CLINICIAN, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) {
+      return deny(res);
+    }
     try {
       const ledger = await ledgerPromise;
       const patient = await ledger.getPatient(req.params.did);
@@ -137,6 +169,9 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
       if (!hospitalID || !recordType) {
         return res.status(400).json({ error: 'hospitalID and recordType are required' });
       }
+      if (!actsForHospital(req.user, hospitalID, ROLES.HOSPITAL_ADMIN, ROLES.CLINICIAN, ROLES.HL7_INTERFACE)) {
+        return deny(res, 'only this hospital\'s staff can register its record references');
+      }
       const ref = await ledger.registerRecordReference({
         refID: req.body.refID || randomUUID(),
         patientDID: req.params.did,
@@ -151,6 +186,9 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService) {
   });
 
   router.get('/:did/references', async (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did) && !hasRole(req.user, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) {
+      return deny(res);
+    }
     try {
       const ledger = await ledgerPromise;
       const refs = await ledger.getRecordReferencesForPatient(req.params.did);

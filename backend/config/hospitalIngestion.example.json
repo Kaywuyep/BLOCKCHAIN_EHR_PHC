@@ -14,7 +14,11 @@
   "general-hospital-langtang": {
     "mode": "hl7",
     "mllpPort": 5001,
-    "hl7Version": "2.5"
+    "hl7Version": "2.5",
+    "_comment": "Optional production hardening: allowedIps = the interface engine's source addresses (all others are dropped); bindAddress = listen only on the VPN interface; fieldMap = where this hospital's feed puts each field, if it differs from the HL7 standard (keys: see DEFAULT_FIELD_MAP in src/services/hl7AdtListener.js).",
+    "allowedIps": ["10.20.0.15"],
+    "bindAddress": "10.20.0.2",
+    "fieldMap": { "hospitalNumber": "PID.3.1" }
   }
 
 }

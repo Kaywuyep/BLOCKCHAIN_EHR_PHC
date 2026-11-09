@@ -1,0 +1,9 @@
+node_modules
+data
+.env
+.env.*
+!.env.example
+!.env.production.example
+config/hospitalIngestion.json
+**/*.test.js
+src/testutil

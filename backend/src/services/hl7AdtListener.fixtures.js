@@ -181,6 +181,9 @@ const oruResultNotAdt =
 
 module.exports = {
   buildSegment,
+  buildMsh,
+  buildPid,
+  buildPv1,
   adtA01Admit,
   adtA08Update,
   adtA03Discharge,

@@ -12,39 +12,51 @@
  * design explicitly treats hospital-internal RBAC as the hospital's own
  * responsibility, separate from PatientChain's authorization ledger.
  */
-class ProviderRegistry {
-  constructor() {
-    // `${hospitalID}::${providerID}` -> provider record
-    this.providers = new Map();
-  }
+const { openDatabase } = require('../db/database');
 
-  static key(hospitalID, providerID) {
-    return `${hospitalID}::${providerID}`;
+const STATUSES = new Set(['ACTIVE', 'SUSPENDED', 'INACTIVE']);
+
+class ProviderRegistry {
+  /** @param {{ db?: import('better-sqlite3').Database }} [options] */
+  constructor({ db } = {}) {
+    this.db = db || openDatabase(':memory:');
+    this.sql = {
+      upsert: this.db.prepare(`INSERT INTO providers (hospital_id, provider_id, data, status, registered_at) VALUES (?, ?, ?, ?, ?)
+                               ON CONFLICT (hospital_id, provider_id) DO UPDATE SET data = excluded.data, status = excluded.status`),
+      get: this.db.prepare('SELECT data FROM providers WHERE hospital_id = ? AND provider_id = ?'),
+      forHospital: this.db.prepare('SELECT data FROM providers WHERE hospital_id = ? ORDER BY provider_id'),
+    };
   }
 
   register({ providerID, hospitalID, name, role, department, status }) {
     if (!providerID || !hospitalID) {
       throw new Error('providerID and hospitalID are required');
     }
+    const normalizedStatus = (status || 'ACTIVE').toUpperCase();
+    if (!STATUSES.has(normalizedStatus)) {
+      throw new Error(`status must be one of ${[...STATUSES].join(', ')}`);
+    }
+    const existing = this.get(providerID, hospitalID);
     const provider = {
       providerID,
       hospitalID,
       name: name || providerID,
       role: role || 'Physician',
       department: department || 'General',
-      status: status || 'ACTIVE',
-      registeredAt: new Date().toISOString(),
+      status: normalizedStatus,
+      registeredAt: existing?.registeredAt || new Date().toISOString(),
     };
-    this.providers.set(ProviderRegistry.key(hospitalID, providerID), provider);
+    this.sql.upsert.run(hospitalID, providerID, JSON.stringify(provider), provider.status, provider.registeredAt);
     return provider;
   }
 
   get(providerID, hospitalID) {
-    return this.providers.get(ProviderRegistry.key(hospitalID, providerID)) || null;
+    const row = this.sql.get.get(hospitalID, providerID);
+    return row ? JSON.parse(row.data) : null;
   }
 
   getForHospital(hospitalID) {
-    return Array.from(this.providers.values()).filter((p) => p.hospitalID === hospitalID);
+    return this.sql.forHospital.all(hospitalID).map((row) => JSON.parse(row.data));
   }
 
   /** Layer-2 check: is this provider currently active staff at this hospital? */
@@ -54,8 +66,4 @@ class ProviderRegistry {
   }
 }
 
-// Singleton -- starts with no providers registered. Register real staff via
-// POST /api/providers/register (see routes/providers.js).
-const providerRegistry = new ProviderRegistry();
-
-module.exports = { ProviderRegistry, providerRegistry };
+module.exports = { ProviderRegistry };

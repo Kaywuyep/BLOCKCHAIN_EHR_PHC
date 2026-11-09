@@ -98,7 +98,13 @@ class OfflineQueue {
         this.markSynced(item.id);
         results.push({ id: item.id, status: 'SYNCED', result });
       } catch (err) {
-        results.push({ id: item.id, status: 'FAILED', error: err.message });
+        if (err.permanent) {
+          // Never valid: replaying it again would fail the same way.
+          this.db.prepare(`UPDATE queue SET status = 'REJECTED', synced_at = ? WHERE id = ?`).run(new Date().toISOString(), item.id);
+          results.push({ id: item.id, status: 'REJECTED', error: err.message });
+        } else {
+          results.push({ id: item.id, status: 'FAILED', error: err.message });
+        }
       }
     }
     return results;
@@ -106,6 +112,16 @@ class OfflineQueue {
 
   async _applyAction(ledger, item) {
     const { action_type: actionType, payload, client_timestamp: clientTimestamp } = item;
+    // Grant/revoke queued by an authenticated patient: the ledger couldn't
+    // be asked who owns the grant while offline, so check it now.
+    if (payload.actorPatientDID && (actionType === 'GRANT_ACCESS' || actionType === 'REVOKE_ACCESS')) {
+      const grant = await ledger.checkAccess({ grantID: payload.grantID });
+      if (!grant || grant.patientDID !== payload.actorPatientDID) {
+        const err = new Error('queued action rejected: the grant does not belong to the patient who queued it');
+        err.permanent = true;
+        throw err;
+      }
+    }
     switch (actionType) {
       case 'REQUEST_ACCESS':
         return ledger.requestAccess(payload);

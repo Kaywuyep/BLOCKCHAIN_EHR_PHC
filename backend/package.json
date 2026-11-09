@@ -7,8 +7,12 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test src/**/*.test.js",
-    "test:hl7-synthetic": "node scripts/sendSyntheticAdt.js"
+    "test": "node --test \"src/**/*.test.js\"",
+    "test:hl7-synthetic": "node scripts/sendSyntheticAdt.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "rotate-keys": "node scripts/rotateKeys.js",
+    "audit": "npm audit --audit-level=moderate"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",
@@ -17,8 +21,13 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.3.0",
+    "jose": "^5.10.0",
     "node-hl7-client": "^4.1.1",
-    "node-hl7-server": "^4.1.1",
-    "uuid": "^9.0.1"
+    "node-hl7-server": "^4.1.1"
+  },
+  "overrides": {
+    "qs": "^6.17.1"
   }
 }

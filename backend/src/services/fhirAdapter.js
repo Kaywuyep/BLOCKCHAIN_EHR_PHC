@@ -1,6 +1,9 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
+const { openDatabase } = require('../db/database');
+const { FieldCipher } = require('../db/fieldCipher');
+
 
 /**
  * fhirAdapter.js
@@ -11,34 +14,41 @@ const { randomUUID } = require('crypto');
  * (unchanged)" and "Hospital B EMR/Database (unchanged)" from Figure 1.
  *
  * The DID -> local MRN mapping below is held only in this module's
- * in-memory store, exactly as the paper specifies it must be: never
- * written on-chain, never replicated to another facility. Swap this for
+ * own off-chain store (an encrypted SQLite database, see db/database.js),
+ * exactly as the paper specifies it must be: never written on-chain,
+ * never replicated to another facility. Swap this for
  * a real hospital's patient index + FHIR server in production; the
  * contract with the rest of the system (resolveRecord's inputs/outputs)
  * stays the same.
  */
 class FhirAdapter {
-  constructor() {
-    // hospitalID -> Map(patientDID -> MRN)      (local mapping, Section 3.5.1)
-    this.didToMrn = new Map();
-    // hospitalID -> Map(MRN -> [FHIR R4 bundle-like records])
-    this.database = new Map();
-    // hospitalID -> Map(hospitalNumber -> { name, dob })
-    //
-    // A hospital's own pre-existing patient roster -- demographics it
-    // already holds against a hospital number, independent of whether
-    // that patient has ever linked a PatientChain DID to it. Used only by
-    // the patient-asserted facility-linkage flow (linkageService.js) to
-    // verify a lookup before any DID <-> hospitalNumber mapping is
-    // written into didToMrn above. Same rule as didToMrn: never leaves
-    // this module, never written on-chain.
-    this.localPatientIndex = new Map();
-  }
-
-  _ensureHospital(hospitalID) {
-    if (!this.didToMrn.has(hospitalID)) this.didToMrn.set(hospitalID, new Map());
-    if (!this.database.has(hospitalID)) this.database.set(hospitalID, new Map());
-    if (!this.localPatientIndex.has(hospitalID)) this.localPatientIndex.set(hospitalID, new Map());
+  /**
+   * @param {{ db?: import('better-sqlite3').Database, cipher?: FieldCipher }} [options]
+   *   Without options the adapter uses a private in-memory database with a
+   *   throwaway key (tests, the simulated demo). server.js passes the
+   *   durable, encrypted store.
+   */
+  constructor({ db, cipher } = {}) {
+    this.db = db || openDatabase(':memory:');
+    this.cipher = cipher || FieldCipher.ephemeral();
+    // Tables (see db/database.js):
+    //   local_patient_index  hospital roster: hospitalNumber -> encrypted { name, dob, ... }
+    //   did_links            DID -> hospital number (Section 3.5.1), never on-chain
+    //   clinical_bundles     encrypted FHIR bundles, keyed by hospital number
+    const q = (sql) => this.db.prepare(sql);
+    this.sql = {
+      upsertLocal: q(`INSERT INTO local_patient_index (hospital_id, hospital_number, data_enc, updated_at)
+                      VALUES (?, ?, ?, ?)
+                      ON CONFLICT (hospital_id, hospital_number) DO UPDATE SET data_enc = excluded.data_enc, updated_at = excluded.updated_at`),
+      getLocal: q('SELECT data_enc FROM local_patient_index WHERE hospital_id = ? AND hospital_number = ?'),
+      listLocal: q('SELECT hospital_number, data_enc FROM local_patient_index WHERE hospital_id = ? ORDER BY hospital_number'),
+      upsertLink: q(`INSERT INTO did_links (hospital_id, patient_did, hospital_number, linked_at) VALUES (?, ?, ?, ?)
+                     ON CONFLICT (hospital_id, patient_did) DO UPDATE SET hospital_number = excluded.hospital_number, linked_at = excluded.linked_at`),
+      getLink: q('SELECT hospital_number FROM did_links WHERE hospital_id = ? AND patient_did = ?'),
+      insertBundle: q('INSERT INTO clinical_bundles (id, hospital_id, hospital_number, bundle_enc, created_at) VALUES (?, ?, ?, ?, ?)'),
+      listBundles: q(`SELECT bundle_enc FROM clinical_bundles WHERE hospital_id = ? AND hospital_number = ?
+                      ORDER BY created_at, rowid`),
+    };
   }
 
   /** Adds (or updates) an entry in a hospital's own patient roster, keyed
@@ -46,12 +56,10 @@ class FhirAdapter {
    *  legacy EMR already has, before PatientChain existed. `name` and `dob`
    *  are required; any further fields (e.g. `sex`, or a `sourceResource`
    *  carrying the full FHIR Patient resource an ingestion path built) are
-   *  stored alongside but not required -- every existing caller that only
-   *  ever passed `{ name, dob }` keeps working unchanged. */
+   *  stored alongside but not required. The record is encrypted at rest. */
   addLocalPatientRecord(hospitalID, hospitalNumber, { name, dob, ...rest }) {
-    this._ensureHospital(hospitalID);
     const record = { name, dob, ...rest };
-    this.localPatientIndex.get(hospitalID).set(hospitalNumber, record);
+    this.sql.upsertLocal.run(hospitalID, hospitalNumber, this.cipher.encryptJson(record), new Date().toISOString());
     return { hospitalNumber, ...record };
   }
 
@@ -60,29 +68,25 @@ class FhirAdapter {
    *  belong to someone with this date of birth" check the patient-asserted
    *  linkage flow needs before it will show a patient any name back. */
   findLocalPatientRecord(hospitalID, hospitalNumber) {
-    this._ensureHospital(hospitalID);
-    return this.localPatientIndex.get(hospitalID).get(hospitalNumber) || null;
+    const row = this.sql.getLocal.get(hospitalID, hospitalNumber);
+    return row ? this.cipher.decryptJson(row.data_enc) : null;
   }
 
   /** Lists everything in a hospital's own roster -- for the hospital's own
    *  admin view of the records patients can link against. Never exposes
    *  which of them are already linked to a DID. */
   listLocalPatientRecords(hospitalID) {
-    this._ensureHospital(hospitalID);
-    return Array.from(this.localPatientIndex.get(hospitalID).entries()).map(([hospitalNumber, record]) => ({
-      hospitalNumber,
-      ...record,
+    return this.sql.listLocal.all(hospitalID).map((row) => ({
+      hospitalNumber: row.hospital_number,
+      ...this.cipher.decryptJson(row.data_enc),
     }));
   }
 
-  /** Called once when a hospital first registers a patient locally. */
+  /** Links a DID to a hospital number (or a freshly minted MRN). */
   registerLocalPatient(hospitalID, patientDID, mrn) {
-    this._ensureHospital(hospitalID);
-    this.didToMrn.get(hospitalID).set(patientDID, mrn || `MRN-${randomUUID().slice(0, 8).toUpperCase()}`);
-    if (!this.database.get(hospitalID).has(this.didToMrn.get(hospitalID).get(patientDID))) {
-      this.database.get(hospitalID).set(this.didToMrn.get(hospitalID).get(patientDID), []);
-    }
-    return this.didToMrn.get(hospitalID).get(patientDID);
+    const hospitalNumber = mrn || `MRN-${randomUUID().slice(0, 8).toUpperCase()}`;
+    this.sql.upsertLink.run(hospitalID, patientDID, hospitalNumber, new Date().toISOString());
+    return hospitalNumber;
   }
 
   /** Wraps a single already-FHIR-shaped resource in a Bundle and appends it
@@ -90,10 +94,6 @@ class FhirAdapter {
    *  createClinicalRecord (below, which resolves a DID to a number first)
    *  and recordResourceByHospitalNumber (which doesn't need a DID at all). */
   _storeBundleEntry(hospitalID, hospitalNumber, resource) {
-    this._ensureHospital(hospitalID);
-    if (!this.database.get(hospitalID).has(hospitalNumber)) {
-      this.database.get(hospitalID).set(hospitalNumber, []);
-    }
     const bundle = {
       resourceType: 'Bundle',
       type: 'collection',
@@ -101,16 +101,15 @@ class FhirAdapter {
       timestamp: new Date().toISOString(),
       entry: [{ resource }],
     };
-    this.database.get(hospitalID).get(hospitalNumber).push(bundle);
+    this.sql.insertBundle.run(bundle.id, hospitalID, hospitalNumber, this.cipher.encryptJson(bundle), bundle.timestamp);
     return bundle;
   }
 
   /** Hospital creates a clinical record locally (Figure 3, step 1). */
   createClinicalRecord(hospitalID, patientDID, record) {
-    this._ensureHospital(hospitalID);
-    const mrn = this.didToMrn.get(hospitalID).get(patientDID);
-    if (!mrn) throw new Error(`patient ${patientDID} has no local record at hospital ${hospitalID}`);
-    return this._storeBundleEntry(hospitalID, mrn, {
+    const link = this.sql.getLink.get(hospitalID, patientDID);
+    if (!link) throw new Error(`patient ${patientDID} has no local record at hospital ${hospitalID}`);
+    return this._storeBundleEntry(hospitalID, link.hospital_number, {
       resourceType: record.recordType === 'lab' ? 'Observation' : 'Encounter',
       id: randomUUID(),
       status: 'final',
@@ -123,14 +122,8 @@ class FhirAdapter {
    * hl7AdtListener.js from a PV1 segment) keyed directly by hospital
    * number -- no DID required. Real-world clinical events arrive from a
    * hospital's ADT feed or EMR long before, if ever, a patient links a
-   * PatientChain DID to that hospital number.
-   *
-   * This writes into the exact same `database` map createClinicalRecord
-   * does. If/when a DID later links to this hospitalNumber
-   * (registerLocalPatient / linkageService.confirmLink), resolveRecord
-   * finds these entries automatically -- registerLocalPatient only
-   * initializes an empty bundle array when none exists yet, so entries
-   * written here first are preserved, not overwritten.
+   * PatientChain DID to that hospital number. If/when a DID later links to
+   * this hospitalNumber, resolveRecord finds these entries automatically.
    */
   recordResourceByHospitalNumber(hospitalID, hospitalNumber, resource) {
     return this._storeBundleEntry(hospitalID, hospitalNumber, resource);
@@ -144,21 +137,15 @@ class FhirAdapter {
    *  4. return the FHIR bundle -- it never touches the blockchain
    */
   resolveRecord(hospitalID, patientDID) {
-    this._ensureHospital(hospitalID);
-    const mrn = this.didToMrn.get(hospitalID).get(patientDID);
-    if (!mrn) {
+    const link = this.sql.getLink.get(hospitalID, patientDID);
+    if (!link) {
       throw new Error(`no local patient index entry for ${patientDID} at ${hospitalID}`);
     }
-    const bundles = this.database.get(hospitalID).get(mrn) || [];
-    return { mrn, bundles };
+    const bundles = this.sql.listBundles.all(hospitalID, link.hospital_number).map((row) => this.cipher.decryptJson(row.bundle_enc));
+    return { mrn: link.hospital_number, bundles };
   }
 }
 
-// Singleton -- starts completely empty. Hospitals populate their own local
-// patient roster via POST /api/patients/local-records/:hospitalID (see
-// routes/patients.js and the Admin Dashboard's "Hospital local patient
-// roster" panel), the same way a real deployment would import from its
-// actual EMR/FHIR server.
-const fhirAdapter = new FhirAdapter();
-
-module.exports = { FhirAdapter, fhirAdapter };
+// No singleton: server.js builds one FhirAdapter on the durable store, and
+// tests build their own in-memory instances.
+module.exports = { FhirAdapter };

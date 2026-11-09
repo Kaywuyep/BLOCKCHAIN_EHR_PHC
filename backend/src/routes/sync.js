@@ -1,9 +1,11 @@
 'use strict';
 
 const express = require('express');
+const { ROLES, requireRole } = require('../auth/policy');
 
 function syncRouter(ledgerPromise, offlineQueue) {
   const router = express.Router();
+  router.use(requireRole(ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN));
 
   // GET status
   router.get('/status', (req, res) => {
@@ -18,7 +20,7 @@ function syncRouter(ledgerPromise, offlineQueue) {
   // (Section 3.6). When flipped back to connected, queued actions are
   // reconciled immediately, matching Figure 5's "Connectivity Restored ->
   // Sync Engine Fires" step.
-  router.post('/connectivity', async (req, res) => {
+  router.post('/connectivity', requireRole(ROLES.SYSTEM_ADMIN), async (req, res) => {
     const { connected } = req.body;
     const ledger = await ledgerPromise;
     let reconcileResults = [];

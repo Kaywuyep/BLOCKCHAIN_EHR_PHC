@@ -147,5 +147,39 @@ test('a bundle written by recordResourceByHospitalNumber before any DID link is 
   const { mrn, bundles } = adapter.resolveRecord('HospitalB-Ibadan', 'did:patientchain:p1');
   assert.equal(mrn, 'IBD-77410');
   assert.equal(bundles.length, 1);
-  assert.equal(bundles[0].entry[0].resource, encounter);
+  assert.deepEqual(bundles[0].entry[0].resource, encounter);
+});
+
+test('PHI is encrypted at rest and survives reopening the database with the same key', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const { openDatabase } = require('../db/database');
+  const { FieldCipher } = require('../db/fieldCipher');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pc-fhir-'));
+  const dbPath = path.join(dir, 'store.sqlite');
+  const keySpec = `k1:${require('node:crypto').randomBytes(32).toString('base64')}`;
+
+  const db1 = openDatabase(dbPath);
+  const adapter1 = new FhirAdapter({ db: db1, cipher: FieldCipher.fromSpec(keySpec) });
+  adapter1.addLocalPatientRecord('H1', 'N-1', { name: 'Amina Bello', dob: '1990-04-12' });
+  adapter1.registerLocalPatient('H1', 'did:patientchain:x', 'N-1');
+  adapter1.recordResourceByHospitalNumber('H1', 'N-1', { resourceType: 'Encounter', id: 'e1', note: 'malaria' });
+
+  const rawRows = JSON.stringify(db1.prepare('SELECT * FROM local_patient_index').all()) +
+    JSON.stringify(db1.prepare('SELECT * FROM clinical_bundles').all());
+  assert.ok(!rawRows.includes('Amina'), 'patient name must not be stored in plaintext');
+  assert.ok(!rawRows.includes('malaria'), 'clinical content must not be stored in plaintext');
+  db1.close();
+
+  const db2 = openDatabase(dbPath);
+  const adapter2 = new FhirAdapter({ db: db2, cipher: FieldCipher.fromSpec(keySpec) });
+  assert.equal(adapter2.findLocalPatientRecord('H1', 'N-1').name, 'Amina Bello');
+  assert.equal(adapter2.resolveRecord('H1', 'did:patientchain:x').bundles[0].entry[0].resource.note, 'malaria');
+
+  const wrongKey = new FhirAdapter({ db: db2, cipher: FieldCipher.ephemeral() });
+  assert.throws(() => wrongKey.findLocalPatientRecord('H1', 'N-1'));
+  db2.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });

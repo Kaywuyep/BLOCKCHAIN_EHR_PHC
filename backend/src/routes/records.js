@@ -1,6 +1,9 @@
 'use strict';
 
 const express = require('express');
+const { isProvider, deny } = require('../auth/policy');
+
+const PRODUCTION = (process.env.NODE_ENV || '').toLowerCase() === 'production';
 
 function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry) {
   const router = express.Router();
@@ -28,6 +31,12 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry) {
       }
       if (grant.hospitalID !== hospitalID) {
         return res.status(403).json({ error: 'grant does not cover this hospital' });
+      }
+
+      // Step 0: only the clinician the grant names may use it. Knowing a
+      // grant ID is not enough.
+      if (!isProvider(req.user, grant.providerID, grant.hospitalID)) {
+        return deny(res, 'only the clinician named on this grant can use it');
       }
 
       // Step 1a: Level-2 "hospital RBAC" (Section 16/35.1). A patient
@@ -84,7 +93,9 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry) {
         grant,
         resolution: {
           hospitalID,
-          localMrn: mrn, // shown here only for the demo -- a real Adapter would never expose this to the caller
+          // Shown only outside production, for the demo: in production the
+          // MRN never leaves the hospital's adapter.
+          ...(PRODUCTION ? {} : { localMrn: mrn }),
           note: 'MRN is resolved locally by the FHIR Adapter and never leaves this hospital; it is never written on-chain.',
         },
         bundles,

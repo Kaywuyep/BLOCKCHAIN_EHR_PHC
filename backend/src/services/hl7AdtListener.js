@@ -35,7 +35,9 @@ const { Server } = require('node-hl7-server');
  *                                      ...) still updates the roster via
  *                                      the generic path -- see
  *                                      encounterStatusForTrigger()
- *   MSH-10    message control ID      -> logged only, not stored
+ *   MSH-10    message control ID      -> duplicate detection in
+ *                                        hl7Inbox.js (a resend is
+ *                                        acknowledged, not reapplied)
  *
  * PID (patient identification) -> FHIR Patient:
  *   PID-3.1   patient/hospital number -> Patient.identifier[0].value,
@@ -154,6 +156,49 @@ function encounterStatusForTrigger(triggerEvent, hasDischargeDateTime) {
   return 'in-progress';
 }
 
+// ── Hospital-specific field mapping ─────────────────────────────────────
+
+/**
+ * Where each mapped value is read from. Interface engines differ: one
+ * hospital puts its hospital number in PID-2 instead of PID-3, another
+ * sends the attending doctor in PV1-17. A hospital's entry in
+ * config/hospitalIngestion.json can override any of these with
+ * `"fieldMap": { "hospitalNumber": "PID.2.1" }`; everything not listed
+ * keeps the standard location below.
+ */
+const DEFAULT_FIELD_MAP = Object.freeze({
+  messageType: 'MSH.9.1',
+  triggerEvent: 'MSH.9.2',
+  controlId: 'MSH.10',
+  hospitalNumber: 'PID.3.1',
+  familyName: 'PID.5.1',
+  givenName: 'PID.5.2',
+  middleName: 'PID.5.3',
+  dob: 'PID.7',
+  sex: 'PID.8',
+  patientClass: 'PV1.2',
+  pointOfCare: 'PV1.3.1',
+  room: 'PV1.3.2',
+  bed: 'PV1.3.3',
+  attendingId: 'PV1.7.1',
+  attendingFamily: 'PV1.7.2',
+  attendingGiven: 'PV1.7.3',
+  admitDateTime: 'PV1.44',
+  dischargeDateTime: 'PV1.45',
+});
+
+const FIELD_PATH = /^[A-Z][A-Z0-9]{2}\.\d+(\.\d+){0,2}$/;
+
+function resolveFieldMap(overrides = {}) {
+  const map = { ...DEFAULT_FIELD_MAP };
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (!(key in DEFAULT_FIELD_MAP)) throw new Error(`unknown HL7 fieldMap key "${key}"`);
+    if (typeof value !== 'string' || !FIELD_PATH.test(value)) throw new Error(`invalid HL7 field path "${value}" for ${key}`);
+    map[key] = value;
+  }
+  return map;
+}
+
 // ── Parsing + mapping ───────────────────────────────────────────────────
 
 /** Parses raw HL7 v2 text into a Message. Throws on genuinely unparseable
@@ -169,22 +214,24 @@ function parseHl7Message(rawText) {
  * if the message isn't an ADT message, or is missing the fields required
  * to build a usable Patient resource.
  */
-function mapAdtMessageToResources(message, { log = console } = {}) {
-  const messageType = message.get('MSH.9.1').toString();
-  const triggerEvent = message.get('MSH.9.2').toString();
-  const controlId = message.get('MSH.10').toString();
+function mapAdtMessageToResources(message, { log = console, fieldMap } = {}) {
+  const map = resolveFieldMap(fieldMap);
+  const field = (key) => message.get(map[key]).toString();
+  const messageType = field('messageType');
+  const triggerEvent = field('triggerEvent');
+  const controlId = field('controlId');
 
   if (messageType !== 'ADT') {
     log.warn(`[hl7AdtListener] skipping non-ADT message (MSH.9.1="${messageType}", control ID ${controlId || '(none)'})`);
     return null;
   }
 
-  const hospitalNumber = message.get('PID.3.1').toString();
-  const familyName = message.get('PID.5.1').toString();
-  const givenName = message.get('PID.5.2').toString();
-  const middleName = message.get('PID.5.3').toString();
-  const dobRaw = message.get('PID.7').toString();
-  const sexRaw = message.get('PID.8').toString();
+  const hospitalNumber = field('hospitalNumber');
+  const familyName = field('familyName');
+  const givenName = field('givenName');
+  const middleName = field('middleName');
+  const dobRaw = field('dob');
+  const sexRaw = field('sex');
 
   if (!hospitalNumber || !familyName) {
     log.warn(
@@ -209,20 +256,20 @@ function mapAdtMessageToResources(message, { log = console } = {}) {
   // PV1 is optional -- an A08 demographic-only update, for instance, may
   // not carry a visit at all. Patient class (PV1-2) is the presence
   // signal: no class, no encounter.
-  const patientClass = message.get('PV1.2').toString();
+  const patientClass = field('patientClass');
   let encounterResource = null;
   if (patientClass) {
-    const pointOfCare = message.get('PV1.3.1').toString();
-    const room = message.get('PV1.3.2').toString();
-    const bed = message.get('PV1.3.3').toString();
+    const pointOfCare = field('pointOfCare');
+    const room = field('room');
+    const bed = field('bed');
     const locationDisplay = [pointOfCare, room, bed].filter(Boolean).join(' ');
 
-    const attendingId = message.get('PV1.7.1').toString();
-    const attendingFamily = message.get('PV1.7.2').toString();
-    const attendingGiven = message.get('PV1.7.3').toString();
+    const attendingId = field('attendingId');
+    const attendingFamily = field('attendingFamily');
+    const attendingGiven = field('attendingGiven');
 
-    const admitDateTime = message.get('PV1.44').toString();
-    const dischargeDateTime = message.get('PV1.45').toString();
+    const admitDateTime = field('admitDateTime');
+    const dischargeDateTime = field('dischargeDateTime');
 
     encounterResource = {
       resourceType: 'Encounter',
@@ -267,10 +314,10 @@ function mapAdtMessageToResources(message, { log = console } = {}) {
  * Never throws -- returns a result object describing what happened, so
  * callers can ACK/NACK or respond to an HTTP request accordingly.
  */
-function ingestParsedMessage(fhirAdapter, hospitalID, message, { log = console } = {}) {
+function ingestParsedMessage(fhirAdapter, hospitalID, message, { log = console, fieldMap } = {}) {
   let mapped;
   try {
-    mapped = mapAdtMessageToResources(message, { log });
+    mapped = mapAdtMessageToResources(message, { log, fieldMap });
   } catch (err) {
     log.warn(`[hl7AdtListener] failed to map message for ${hospitalID}: ${err.message}`);
     return { ok: false, reason: err.message };
@@ -292,6 +339,7 @@ function ingestParsedMessage(fhirAdapter, hospitalID, message, { log = console }
     hospitalID,
     hospitalNumber: mapped.hospitalNumber,
     triggerEvent: mapped.triggerEvent,
+    controlId: mapped.controlId,
     encounterRecorded,
   };
 }
@@ -301,7 +349,7 @@ function ingestParsedMessage(fhirAdapter, hospitalID, message, { log = console }
  * and the synthetic-message test script both start here. Parsing errors
  * are caught here so a malformed message never crashes the caller.
  */
-function ingestRawAdtText(fhirAdapter, hospitalID, rawText, { log = console } = {}) {
+function ingestRawAdtText(fhirAdapter, hospitalID, rawText, { log = console, fieldMap } = {}) {
   let message;
   try {
     message = parseHl7Message(rawText);
@@ -309,49 +357,105 @@ function ingestRawAdtText(fhirAdapter, hospitalID, rawText, { log = console } = 
     log.warn(`[hl7AdtListener] could not parse HL7 message for ${hospitalID}: ${err.message}`);
     return { ok: false, reason: `unparseable HL7 message: ${err.message}` };
   }
-  return ingestParsedMessage(fhirAdapter, hospitalID, message, { log });
+  return ingestParsedMessage(fhirAdapter, hospitalID, message, { log, fieldMap });
 }
 
 // ── MLLP transport (the traditional hospital-side wire protocol) ────────
 
+/** "::ffff:10.0.0.5" -> "10.0.0.5", so IPv4 allowlists match on dual-stack sockets. */
+function normalizeIp(address) {
+  return (address || '').replace(/^::ffff:/, '');
+}
+
 /**
- * Starts an MLLP TCP listener for one hospital's ADT feed. Call once per
+ * Starts an MLLP listener for one hospital's ADT feed. Call once per
  * hospital that's configured for HL7 ingestion (see
  * config/hospitalIngestion.example.json) -- each hospital gets its own
  * port, matching how real ADT interfaces are usually provisioned.
  *
- * Returns the `Inbound` instance (from node-hl7-server) so the caller can
- * attach `.on('listen', ...)` / `.on('error', ...)` etc.
+ * Production options:
+ *   inbox       Hl7Inbox: store-then-process with duplicate detection,
+ *               retry and dead-letter (see hl7Inbox.js). Without it the
+ *               message is processed directly (tests, legacy callers).
+ *   tls         { cert, key, ca? } PEM buffers. With `ca`, clients must
+ *               present a certificate signed by it (mutual TLS).
+ *   allowedIps  interface-engine source addresses; any other connection
+ *               is dropped before a byte is read.
+ *   bindAddress interface to listen on, e.g. the VPN address.
+ *
+ * Returns the `Inbound` instance (from node-hl7-server).
  */
-function startMllpListener({ fhirAdapter, hospitalID, port, version = '2.5', log = console, onMessage = () => {} }) {
-  const server = new Server();
+function startMllpListener({
+  fhirAdapter,
+  inbox,
+  hospitalID,
+  port,
+  version = '2.5',
+  log = console,
+  onMessage = () => {},
+  fieldMap,
+  tls,
+  allowedIps = [],
+  bindAddress,
+}) {
+  const serverOptions = {};
+  if (bindAddress) serverOptions.bindAddress = bindAddress;
+  if (tls) {
+    serverOptions.tls = { cert: tls.cert, key: tls.key, ca: tls.ca, requestCert: Boolean(tls.ca) };
+  }
+  const server = new Server(serverOptions);
   // node-hl7-server's `name` option rejects most punctuation (it's meant
   // for log-friendly labels, not arbitrary strings) -- hospitalID may
   // contain hyphens (e.g. "hospital-a"), so sanitize rather than pass it
   // through raw.
   const listenerName = `hl7_adt_${hospitalID.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+  const allow = new Set(allowedIps.map(normalizeIp));
+
   const inbound = server.createInbound({ port, version, name: listenerName }, async (req, res) => {
     const message = req.getMessage();
-    const result = ingestParsedMessage(fhirAdapter, hospitalID, message, { log });
+    if (inbox) {
+      const outcome = inbox.receive(hospitalID, message.toString());
+      if (outcome.ack === 'AA') {
+        log.log(`[hl7AdtListener] ${hospitalID}: ${outcome.duplicate ? 'duplicate' : outcome.status} message ${outcome.id}`);
+      } else {
+        log.warn(`[hl7AdtListener] ${hospitalID}: answering ${outcome.ack} -- ${outcome.reason}`);
+      }
+      await res.sendResponse(outcome.ack);
+      return;
+    }
+
+    const result = ingestParsedMessage(fhirAdapter, hospitalID, message, { log, fieldMap });
     try {
       onMessage(result);
     } catch (err) {
       log.warn(`[hl7AdtListener] status callback failed: ${err.message}`);
     }
     if (result.ok) {
-      log.log(`[hl7AdtListener] ${hospitalID}: ingested ADT^${result.triggerEvent} for ${result.hospitalNumber}`);
+      log.log(`[hl7AdtListener] ${hospitalID}: ingested ADT^${result.triggerEvent} (control ID ${result.controlId || 'none'})`);
       await res.sendResponse('AA');
     } else {
       log.warn(`[hl7AdtListener] ${hospitalID}: rejecting message -- ${result.reason}`);
       await res.sendResponse('AE');
     }
   });
-  inbound.on('listen', () => log.log(`[hl7AdtListener] ${hospitalID}: MLLP listener on port ${port}`));
+
+  if (allow.size) {
+    inbound.on('client.connect', (socket) => {
+      const remote = normalizeIp(socket.remoteAddress);
+      if (!allow.has(remote)) {
+        log.warn(`[hl7AdtListener] ${hospitalID}: refused MLLP connection from ${remote} (not in allowlist)`);
+        socket.destroy();
+      }
+    });
+  }
+  inbound.on('listen', () => log.log(`[hl7AdtListener] ${hospitalID}: MLLP${tls ? '/TLS' : ''} listener on port ${port}`));
   inbound.on('error', (err) => log.warn(`[hl7AdtListener] ${hospitalID}: MLLP listener error: ${err.message}`));
   return inbound;
 }
 
 module.exports = {
+  DEFAULT_FIELD_MAP,
+  resolveFieldMap,
   hl7DateToIso,
   hl7SexToFhirGender,
   hl7PatientClassToFhirClass,

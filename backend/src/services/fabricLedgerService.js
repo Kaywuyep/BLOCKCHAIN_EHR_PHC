@@ -23,6 +23,16 @@ const utf8Decoder = new TextDecoder();
  *   FABRIC_KEY_DIR=../network/crypto-config/.../users/User1@.../msp/keystore
  *   FABRIC_CHANNEL_NAME=patientchainchannel
  *   FABRIC_CHAINCODE_NAME=patientchain
+ *
+ * Production signing key, in order of preference:
+ *   1. an HSM over PKCS#11 -- the private key never leaves the device:
+ *        FABRIC_HSM_LIBRARY=/usr/lib/softhsm/libsofthsm2.so
+ *        FABRIC_HSM_LABEL=patientchain   FABRIC_HSM_PIN=...   FABRIC_HSM_KEY_ID=<CKA_ID>
+ *   2. FABRIC_KEY_PATH=<one PEM file>, readable only by the service user;
+ *   3. FABRIC_KEY_DIR (the cryptogen layout, for the local network).
+ *
+ * Certificate rotation: replace the files and send SIGHUP; reconnect()
+ * re-reads the TLS root, certificate and key without a restart.
  */
 class FabricLedgerService {
   constructor(cfg) {
@@ -37,7 +47,8 @@ class FabricLedgerService {
     });
 
     const identity = { mspId: this.cfg.mspId, credentials: this._readCert() };
-    const signer = signers.newPrivateKeySigner(this._readPrivateKey());
+    const signer = this._createSigner();
+    this.client = client;
 
     this.gateway = connect({
       client,
@@ -56,6 +67,39 @@ class FabricLedgerService {
 
   close() {
     this.gateway?.close();
+    this.client?.close();
+    this._closeSigner?.();
+    this._hsmFactory?.dispose();
+    this._hsmFactory = null;
+  }
+
+  /** Re-reads credentials (after certificate rotation) and reconnects. */
+  async reconnect() {
+    const old = { gateway: this.gateway, client: this.client, contract: this.contract, closeSigner: this._closeSigner, factory: this._hsmFactory };
+    this._hsmFactory = null;
+    try {
+      await this.connect();
+    } catch (err) {
+      // Keep serving on the old connection.
+      Object.assign(this, { gateway: old.gateway, client: old.client, contract: old.contract, _closeSigner: old.closeSigner, _hsmFactory: old.factory });
+      throw err;
+    }
+    old.gateway?.close();
+    old.client?.close();
+    old.closeSigner?.();
+    old.factory?.dispose();
+    return this;
+  }
+
+  _createSigner() {
+    const hsm = this.cfg.hsm;
+    if (hsm && hsm.library) {
+      this._hsmFactory = signers.newHSMSignerFactory(hsm.library);
+      const { signer, close } = this._hsmFactory.newSigner({ label: hsm.label, pin: hsm.pin, identifier: hsm.keyId });
+      this._closeSigner = close;
+      return signer;
+    }
+    return signers.newPrivateKeySigner(this._readPrivateKey());
   }
 
   _readTlsRoot() {
@@ -67,6 +111,13 @@ class FabricLedgerService {
   }
 
   _readPrivateKey() {
+    if (this.cfg.keyPath) {
+      const mode = fs.statSync(this.cfg.keyPath).mode & 0o077;
+      if (mode && process.env.NODE_ENV === 'production') {
+        throw new Error(`${this.cfg.keyPath} is readable by group/others; chmod 0400 it`);
+      }
+      return crypto.createPrivateKey(fs.readFileSync(this.cfg.keyPath));
+    }
     const keyDir = this.cfg.keyDir;
     const files = fs.readdirSync(keyDir);
     if (files.length === 0) throw new Error(`no private key found in ${keyDir}`);
