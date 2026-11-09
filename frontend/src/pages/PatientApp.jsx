@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { useSession } from '../auth';
 import { LedgerStrip } from '../components/LedgerStrip';
 
 export function PatientApp() {
-  const [patientDID, setPatientDID] = useState('');
+  // Signed in, the patient's DID comes from their account binding; they
+  // can't type in someone else's.
+  const { session, refresh } = useSession();
+  const [patientDID, setPatientDID] = useState(session?.patientDID || '');
   const [patient, setPatient] = useState(null);
   const [references, setReferences] = useState([]);
   const [grants, setGrants] = useState([]);
@@ -58,6 +62,7 @@ export function PatientApp() {
       // it, instead of re-querying with the empty string that started this.
       setPatientDID(result.patient.patientDID);
       setPatient(result.patient);
+      if (session) await refresh();
       await loadAll(result.patient.patientDID);
     } catch (e) {
       setError(e.message);
@@ -175,11 +180,12 @@ export function PatientApp() {
           <input
             value={patientDID}
             onChange={(e) => setPatientDID(e.target.value)}
-            placeholder="did:patientchain:... (leave blank to mint a new one)"
+            readOnly={Boolean(session)}
+            placeholder={session ? 'not registered yet: register to mint your DID' : 'did:patientchain:... (leave blank to mint a new one)'}
           />
         </div>
 
-        {!patient && (
+        {!patient && !session && (
           <div className="grid-2">
             <div className="field">
               <label>Home hospital ID (optional)</label>

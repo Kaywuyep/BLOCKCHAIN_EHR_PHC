@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSession } from '../auth';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
@@ -16,11 +17,13 @@ export function AdminDashboard() {
   const [queue, setQueue] = useState([]);
   const [pendingReviews, setPendingReviews] = useState([]);
   const [reviewNotes, setReviewNotes] = useState({});
-  const [reviewerID, setReviewerID] = useState('');
+  const { session } = useSession();
+  // Signed in, the backend records the reviewer from the token itself.
+  const [reviewerID, setReviewerID] = useState(session?.sub || '');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const [rosterHospitalID, setRosterHospitalID] = useState('');
+  const [rosterHospitalID, setRosterHospitalID] = useState(session?.hospitalID || '');
   const [roster, setRoster] = useState([]);
   const [rosterForm, setRosterForm] = useState(EMPTY_ROSTER_FORM);
   const [rosterError, setRosterError] = useState(null);
@@ -360,7 +363,7 @@ export function AdminDashboard() {
         </div>
         <div className="field" style={{ maxWidth: 280 }}>
           <label>Reviewing as (your reviewer ID)</label>
-          <input value={reviewerID} onChange={(e) => setReviewerID(e.target.value)} />
+          <input value={reviewerID} onChange={(e) => setReviewerID(e.target.value)} readOnly={Boolean(session)} />
         </div>
         {pendingReviews.length === 0 && <p className="hint">No emergency accesses awaiting review.</p>}
         {pendingReviews.map((g) => (

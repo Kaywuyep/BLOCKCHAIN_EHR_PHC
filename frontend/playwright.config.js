@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
-import { BACKEND_PORT, FRONTEND_PORT } from './e2e/config.js';
+import { BACKEND_PORT, FRONTEND_PORT, AUTH_BACKEND_PORT, AUTH_FRONTEND_PORT } from './e2e/config.js';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+
+// Fresh data directories per run, so the durable store starts empty.
+const dataDir = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `patientchain-e2e-${name}-`));
 
 // PatientChain e2e suite. Runs against LEDGER_MODE=simulated (no Docker/
 // Fabric needed) -- the same demo-mode backend the README recommends for
@@ -33,7 +39,7 @@ export default defineConfig({
       command: 'node src/server.js',
       cwd: '../backend',
       port: BACKEND_PORT,
-      env: { PORT: String(BACKEND_PORT), LEDGER_MODE: 'simulated' },
+      env: { PORT: String(BACKEND_PORT), LEDGER_MODE: 'simulated', AUTH_MODE: 'off', HL7_MLLP_ENABLED: 'false', RATE_LIMIT_PER_MINUTE: '0', DATA_DIR: dataDir('open') },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: 'pipe',
@@ -44,6 +50,35 @@ export default defineConfig({
       cwd: '.',
       port: FRONTEND_PORT,
       env: { VITE_API_BASE: `http://127.0.0.1:${BACKEND_PORT}/api` },
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+    {
+      command: 'node src/server.js',
+      cwd: '../backend',
+      port: AUTH_BACKEND_PORT,
+      env: {
+        PORT: String(AUTH_BACKEND_PORT),
+        LEDGER_MODE: 'simulated',
+        AUTH_MODE: 'local',
+        AUTH_JWT_SECRET: 'e2e-only-secret-e2e-only-secret-1234',
+        HL7_MLLP_ENABLED: 'false',
+        RATE_LIMIT_PER_MINUTE: '0',
+        AUTH_RATE_LIMIT_PER_MINUTE: '1000',
+        DATA_DIR: dataDir('auth'),
+      },
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+    {
+      command: `npx vite --port ${AUTH_FRONTEND_PORT} --strictPort`,
+      cwd: '.',
+      port: AUTH_FRONTEND_PORT,
+      env: { VITE_API_BASE: `http://127.0.0.1:${AUTH_BACKEND_PORT}/api` },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: 'pipe',

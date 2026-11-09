@@ -1,12 +1,19 @@
 // In development Vite proxies /api to the live backend on port 6000.
 // VITE_API_BASE remains available when the frontend is deployed separately.
+import { getToken } from './auth';
+
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
 async function request(path, options = {}) {
+  const token = getToken();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   });
+  if (res.status === 401 && token) {
+    // Expired or revoked session: back to the sign-in screen.
+    window.dispatchEvent(new Event('patientchain:unauthorized'));
+  }
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const body = isJson ? await res.json() : await res.text();
   if (!res.ok) {

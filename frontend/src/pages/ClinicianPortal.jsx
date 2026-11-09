@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSession } from '../auth';
 import { api } from '../api';
 
 // FHIR resource types offered as granular scope checkboxes (docs/design.md
@@ -15,8 +16,12 @@ const PURPOSE_OPTIONS = ['Treatment', 'Referral', 'Second Opinion'];
 
 export function ClinicianPortal() {
   const [patientDID, setPatientDID] = useState('');
-  const [providerID, setProviderID] = useState('');
-  const [hospitalID, setHospitalID] = useState('');
+  // Signed in, the clinician acts as themselves: the backend refuses any
+  // other provider or hospital, so the fields are fixed to the session.
+  const { session } = useSession();
+  const [providerID, setProviderID] = useState(session?.providerID || '');
+  const [hospitalID, setHospitalID] = useState(session?.hospitalID || '');
+  const lockedIdentity = Boolean(session?.providerID);
   const [purpose, setPurpose] = useState('Treatment');
   const [scope, setScope] = useState(
     Object.fromEntries(SCOPE_OPTIONS.map((o) => [o.key, o.defaultChecked]))
@@ -127,6 +132,7 @@ export function ClinicianPortal() {
             <input
               value={providerID}
               onChange={(e) => setProviderID(e.target.value)}
+              readOnly={lockedIdentity}
               placeholder="registered via POST /api/providers/register"
             />
           </div>
@@ -135,6 +141,7 @@ export function ClinicianPortal() {
             <input
               value={hospitalID}
               onChange={(e) => setHospitalID(e.target.value)}
+              readOnly={lockedIdentity}
               placeholder="the hospital's ID, as its admin dashboard shows it"
             />
           </div>
