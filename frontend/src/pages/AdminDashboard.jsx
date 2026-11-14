@@ -89,8 +89,10 @@ export function AdminDashboard() {
     try { await api.setConnectivity(!syncStatus?.connected); await refresh(); } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
-  const ledgerEntries = events.map((e) => ({
-    id: `${e.type}-${e.timestamp}`,
+  // Events from one Fabric block share a timestamp, so key on the
+  // transaction ID (unique per event) and position.
+  const ledgerEntries = events.map((e, i) => ({
+    id: `${e.txID || e.type}-${e.timestamp}-${i}`,
     status: e.type.replace(/([a-z])([A-Z])/g, '$1 $2'),
     title: describeEvent(e),
     timestamp: e.timestamp,

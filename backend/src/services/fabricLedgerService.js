@@ -3,10 +3,52 @@
 const fs = require('fs');
 const grpc = require('@grpc/grpc-js');
 const { connect, signers } = require('@hyperledger/fabric-gateway');
+const protos = require('@hyperledger/fabric-protos');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 
 const utf8Decoder = new TextDecoder();
+
+// How many recent blocks to replay into the event feed at start-up.
+const EVENT_REPLAY_BLOCKS = BigInt(process.env.FABRIC_EVENT_REPLAY_BLOCKS || 1000);
+
+/**
+ * When a replayed event happened. Chaincode events carry no block time, so
+ * use the latest time recorded in the payload itself (grant or audit entry),
+ * ignoring expiresAt, which is in the future.
+ */
+function eventTime(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  let latest = null;
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'expiresAt' || typeof v !== 'string' || !/(At|timestamp|Timestamp)$/.test(k)) continue;
+    const t = Date.parse(v);
+    if (!Number.isNaN(t) && (latest === null || t > latest)) latest = t;
+  }
+  return latest === null ? null : new Date(latest).toISOString();
+}
+
+/**
+ * A chaincode rejection reaches the Gateway client as a gRPC error such as
+ * "10 ABORTED: failed to endorse transaction", with the chaincode's own
+ * message ("chaincode response 500, grant X has already been reviewed")
+ * only in err.details. Surface that message, as the simulated ledger does,
+ * so the API returns a readable 400 instead of a gRPC status line.
+ * Network, timeout and commit errors are returned unchanged.
+ */
+function chaincodeError(err) {
+  const texts = [...(Array.isArray(err && err.details) ? err.details.map((d) => d && d.message) : []), err && err.message];
+  for (const text of texts) {
+    const m = typeof text === 'string' && text.match(/chaincode response \d+, ([\s\S]+)$/);
+    if (m) {
+      const e = new Error(m[1].trim());
+      e.cause = err;
+      e.code = err.code;
+      return e;
+    }
+  }
+  return err;
+}
 
 /**
  * fabricLedgerService.js
@@ -82,26 +124,52 @@ class FabricLedgerService {
    * Event-driven updates (Section 3.4.4): subscribes to the chaincode's own
    * events (AccessRequested, AccessGranted, AccessRevoked, BreakGlass...,
    * AuditEntryWritten) through the Gateway instead of polling the ledger.
-   * Reconnects with a short backoff if the stream drops.
+   *
+   * On start it replays the most recent blocks (EVENT_REPLAY_BLOCKS) so the
+   * "Ledger Events" feed shows history after a restart; replayed events
+   * fill the log but are not pushed to live subscribers. If the stream
+   * drops it reconnects with a short backoff and resumes from the last
+   * block seen, skipping transactions it already has, so nothing is lost.
    */
   async _listenForEvents(network) {
     this._eventsClosed = false;
     let backoff = 1000;
+    const height = await this._chainHeight(network).catch(() => null);
+    let resumeFrom = height === null ? undefined : (height > EVENT_REPLAY_BLOCKS ? height - EVENT_REPLAY_BLOCKS : 0n);
+    const seen = new Set(this.eventLog.map((e) => e.txID));
+    let lastReplayTime = null;
     while (!this._eventsClosed && this.network === network) {
       try {
-        this._eventStream = await network.getChaincodeEvents(this.cfg.chaincodeName);
+        this._eventStream = await network.getChaincodeEvents(
+          this.cfg.chaincodeName,
+          resumeFrom === undefined ? undefined : { startBlock: resumeFrom }
+        );
         backoff = 1000;
         for await (const ev of this._eventStream) {
+          resumeFrom = ev.blockNumber;
+          if (seen.has(ev.transactionId)) continue;
+          seen.add(ev.transactionId);
+          if (seen.size > 5000) seen.delete(seen.values().next().value);
           let payload = null;
           try {
             payload = JSON.parse(utf8Decoder.decode(ev.payload));
           } catch {
             payload = null;
           }
-          const evt = { type: ev.eventName, payload, timestamp: new Date().toISOString(), txID: ev.transactionId, block: String(ev.blockNumber) };
+          const replayed = height !== null && ev.blockNumber < height;
+          // A replayed event with no time of its own (e.g. a record pointer)
+          // takes the time of the event before it in block order.
+          if (replayed) lastReplayTime = eventTime(payload) || lastReplayTime;
+          const evt = {
+            type: ev.eventName,
+            payload,
+            timestamp: (replayed && lastReplayTime) || new Date().toISOString(),
+            txID: ev.transactionId,
+            block: String(ev.blockNumber),
+          };
           this.eventLog.push(evt);
           if (this.eventLog.length > 500) this.eventLog.shift();
-          this.events.emit('event', evt);
+          if (!replayed) this.events.emit('event', evt);
         }
       } catch (err) {
         if (this._eventsClosed) return;
@@ -110,6 +178,13 @@ class FabricLedgerService {
       await new Promise((r) => setTimeout(r, backoff));
       backoff = Math.min(backoff * 2, 30000);
     }
+  }
+
+  /** Current block height of the channel, from the qscc system chaincode. */
+  async _chainHeight(network) {
+    const bytes = await network.getContract('qscc').evaluateTransaction('GetChainInfo', this.cfg.channelName);
+    const info = protos.common.BlockchainInfo.deserializeBinary(bytes);
+    return BigInt(info.getHeight());
   }
 
   close() {
@@ -175,13 +250,21 @@ class FabricLedgerService {
   }
 
   async _evaluate(contractName, fn, ...args) {
-    const result = await this.contract.evaluateTransaction(`${contractName}:${fn}`, ...args);
-    return this._parse(result);
+    try {
+      const result = await this.contract.evaluateTransaction(`${contractName}:${fn}`, ...args);
+      return this._parse(result);
+    } catch (err) {
+      throw chaincodeError(err);
+    }
   }
 
   async _submit(contractName, fn, ...args) {
-    const result = await this.contract.submitTransaction(`${contractName}:${fn}`, ...args);
-    return this._parse(result);
+    try {
+      const result = await this.contract.submitTransaction(`${contractName}:${fn}`, ...args);
+      return this._parse(result);
+    } catch (err) {
+      throw chaincodeError(err);
+    }
   }
 
   _parse(bytes) {
@@ -326,4 +409,4 @@ class FabricLedgerService {
   }
 }
 
-module.exports = { FabricLedgerService };
+module.exports = { FabricLedgerService, chaincodeError, eventTime };
