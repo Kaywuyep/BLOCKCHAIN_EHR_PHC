@@ -1,0 +1,111 @@
+/* Clinician → View Records */
+.vr-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.vr-tabs { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.vr-tabs button { border: none; background: none; padding: 7px 16px; border-radius: 999px; font: 600 13px var(--font-ui); color: var(--ink-soft); cursor: pointer; }
+.vr-tabs button span { opacity: .65; margin-left: 4px; }
+.vr-tabs button.active { background: var(--verdigris); color: #fff; }
+.vr-search { flex: 1; min-width: 220px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 999px; font: 13px var(--font-ui); background: var(--panel); }
+.vr-search:focus { outline: none; border-color: var(--verdigris); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+
+.vr-empty { text-align: center; padding: 40px 20px; background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius-lg); color: var(--ink-soft); }
+.vr-empty-icon { font-size: 32px; margin-bottom: 8px; }
+.vr-empty strong { color: var(--ink); display: block; margin-bottom: 4px; }
+
+.vr-list { display: flex; flex-direction: column; gap: 12px; }
+.vr-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; transition: box-shadow .15s ease, border-color .15s ease; }
+.vr-card.status-active { border-left: 4px solid var(--sage); }
+.vr-card.status-pending { border-left: 4px solid var(--amber); }
+.vr-card.status-revoked, .vr-card.status-expired { border-left: 4px solid var(--line); opacity: .75; }
+.vr-card.open { box-shadow: var(--shadow-lg); border-color: rgba(37,99,235,.35); }
+
+.vr-card-head { display: flex; gap: 14px; align-items: center; padding: 16px 18px; }
+.vr-card.status-active .vr-card-head { cursor: pointer; }
+.vr-card.status-active .vr-card-head:hover { background: rgba(37,99,235,.03); }
+.vr-avatar { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--brand-gradient); color: #fff; font-weight: 700; font-size: 15px; }
+.vr-avatar.emergency { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+.vr-main { flex: 1; min-width: 0; }
+.vr-name { font-weight: 700; font-size: 15.5px; color: var(--ink); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vr-mrn { font: 500 12px var(--font-data); color: var(--ink-soft); }
+.vr-meta { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+.vr-hosp { color: var(--ink); font-weight: 600; }
+.vr-scope { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.vr-chip { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--parchment); color: var(--ink-soft); }
+.vr-chip.emergency { background: var(--amber-bg); color: #b45309; }
+
+.vr-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.vr-status { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; padding: 3px 10px; border-radius: 999px; }
+.vr-status.active { background: var(--sage-bg); color: #047857; }
+.vr-status.pending { background: var(--amber-bg); color: #b45309; }
+.vr-status.revoked, .vr-status.expired { background: var(--parchment); color: var(--ink-soft); }
+.vr-when { font-size: 12px; color: var(--ink-soft); }
+.vr-toggle { display: inline-flex; align-items: center; gap: 6px; min-width: 132px; justify-content: center; }
+.vr-caret { font-size: 11px; }
+
+.vr-body { border-top: 1px solid var(--line); background: #f8fafc; padding: 16px 18px 18px; animation: vr-open .18s ease-out; }
+@keyframes vr-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.vr-body-bar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px; }
+.vr-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.vr-filters button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; font: 600 12px var(--font-ui); color: var(--ink-soft); cursor: pointer; }
+.vr-filters button span { opacity: .6; margin-left: 3px; }
+.vr-filters button.active { border-color: var(--verdigris); background: var(--verdigris); color: #fff; }
+.vr-actions { display: flex; gap: 6px; }
+.vr-notes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.vr-note { font-size: 11.5px; padding: 4px 10px; border-radius: 8px; background: #fff; border: 1px solid var(--line); color: var(--ink-soft); }
+.vr-note.live { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.vr-note.warn { background: var(--amber-bg); border-color: #fde68a; color: #92400e; }
+
+.vr-records { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.vr-record { display: flex; gap: 12px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.vr-record-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--parchment); font-size: 17px; flex-shrink: 0; }
+.vr-record.type-Observation .vr-record-icon { background: #ecfdf5; }
+.vr-record.type-DiagnosticReport .vr-record-icon { background: #eff6ff; }
+.vr-record.type-MedicationRequest .vr-record-icon { background: #fdf2f8; }
+.vr-record.type-Condition .vr-record-icon { background: #fef2f2; }
+.vr-record.type-Encounter .vr-record-icon { background: #f5f3ff; }
+.vr-record.type-DocumentReference .vr-record-icon { background: #fffbeb; }
+.vr-record-main { flex: 1; min-width: 0; }
+.vr-record-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.vr-record-title { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.vr-record-date { font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
+.vr-record-type { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 2px 0 6px; }
+.vr-value { font: 12px/1.5 var(--font-data); background: var(--parchment); border-radius: 6px; padding: 6px 9px; color: var(--ink); }
+.vr-text { font-size: 12.5px; line-height: 1.5; color: var(--ink); margin-top: 4px; }
+.vr-doc { white-space: pre-wrap; background: #fffbeb; border-radius: 6px; padding: 6px 9px; }
+.vr-who { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; }
+
+@media (max-width: 640px) {
+  .vr-card-head { flex-wrap: wrap; }
+  .vr-side { flex-direction: row; align-items: center; width: 100%; justify-content: space-between; }
+  .vr-records { grid-template-columns: 1fr; }
+}
+
+.vr-emergency { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 12px; border-radius: var(--radius); background: var(--amber-bg); border: 1px solid #fde68a; font-size: 13px; }
+.vr-extend { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.vr-extend input { min-width: 240px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: 13px var(--font-ui); }
+.vr-extend select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; font: 13px var(--font-ui); }
+.vr-record.type-AllergyIntolerance { border-color: #fecaca; }
+.vr-record.type-AllergyIntolerance .vr-record-icon { background: #fef2f2; }
+.vr-allergy { color: #b91c1c; }
+
+/* Request Access / Emergency Access */
+.cl-search { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.cl-search .btn { height: 44px; }
+.cl-note { padding: 12px 14px; border-radius: var(--radius); background: var(--parchment); font-size: 13.5px; color: var(--ink-soft); }
+.cl-hospitals { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.cl-hospital { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: var(--radius); background: #fff; cursor: pointer; font-size: 14px; }
+.cl-hospital.on { border-color: var(--verdigris); background: var(--brand-gradient-subtle); }
+.cl-hospital.has { cursor: default; opacity: .85; }
+.cl-hospital-name { flex: 1; font-weight: 600; }
+.cl-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.cl-tag.active { background: var(--sage-bg); color: #047857; }
+.cl-tag.pending { background: var(--amber-bg); color: #b45309; }
+.cl-types { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; padding-top: 4px; }
+.cl-types label { display: flex; gap: 6px; align-items: center; font-weight: 400; color: var(--ink); }
+.cl-sent { margin-top: 12px; font-size: 13.5px; }
+.cl-sent .ok { color: #047857; }
+.cl-sent .bad { color: #b91c1c; }
+.dash-welcome.emergency { background: linear-gradient(135deg, #b45309 0%, #dc2626 100%); }
+.cl-bg-result { border-left: 4px solid #dc2626; }
+.btn-danger-solid { background: #dc2626; color: #fff; border: none; }
+.btn-danger-solid:hover { background: #b91c1c; }
+.btn-danger-solid:disabled { opacity: .5; }

@@ -28,6 +28,10 @@ const { ProviderRegistry } = require('../services/providerRegistry');
 const { LinkageService } = require('../services/linkageService');
 const { OfflineQueue } = require('../sync/offlineQueue');
 const { Hl7Inbox } = require('../services/hl7Inbox');
+const { HospitalRegistry } = require('../services/hospitalRegistry');
+const { ReferenceService } = require('../services/referenceService');
+const { UserDirectory } = require('../services/userDirectory');
+const { Hl7ListenerManager } = require('../services/hl7ListenerManager');
 
 async function createTestServer({ authMode = 'off', env = {}, withInbox = true } = {}) {
   const config = loadConfig({
@@ -53,6 +57,13 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     ? new Hl7Inbox({ db, cipher, fhirAdapter, log: { log() {}, warn() {}, error() {} }, retryIntervalMs: 10 })
     : null;
 
+  const hospitalRegistry = new HospitalRegistry({ db, cipher });
+  hospitalRegistry.importLegacyConfig();
+  const userDirectory = new UserDirectory({ db });
+  // FR3: on-chain pointers registered at the point of care.
+  const referenceService = new ReferenceService({ ledgerPromise, fhirAdapter, logger }).attach();
+  const listenerManager = new Hl7ListenerManager({ registry: hospitalRegistry, inbox, mllpEnabled: false, logger });
+
   const app = createApp({
     config,
     logger,
@@ -65,6 +76,11 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     inbox,
     identityStore,
     db,
+    hospitalRegistry,
+    userDirectory,
+    listenerManager,
+    referenceService,
+    cipher,
   });
 
   const server = http.createServer(app);
@@ -83,6 +99,23 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     return (await res.json()).token;
   }
 
+  /**
+   * Registers a patient the FR1 way: seeds a roster record at a hospital,
+   * looks it up (hospital number + DOB) and creates the DID with it as the
+   * first facility. Returns the HTTP response of /patients/register.
+   */
+  async function registerPatient(token, { hospitalID = 'hospital-a', hospitalNumber = `HN-${randomUUID().slice(0, 8)}`, name = 'Test Patient', dob = '1990-01-01', body = {} } = {}) {
+    fhirAdapter.addLocalPatientRecord(hospitalID, hospitalNumber, { name, dob });
+    const post = (path, payload) =>
+      fetch(`${baseUrl}/api${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(payload),
+      });
+    await post('/patients/register/lookup', { hospitalID, hospitalNumber, dateOfBirth: dob });
+    return post('/patients/register', { ...body, firstFacility: { hospitalID, hospitalNumber } });
+  }
+
   async function close() {
     await new Promise((resolve) => server.close(resolve));
     offlineQueue.db.close();
@@ -96,6 +129,7 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     baseUrl,
     close,
     login,
+    registerPatient,
     ledger,
     fhirAdapter,
     providerRegistry,
@@ -103,6 +137,12 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     offlineQueue,
     inbox,
     identityStore,
+    hospitalRegistry,
+    userDirectory,
+    listenerManager,
+    referenceService,
+    db,
+    cipher,
   };
 }
 

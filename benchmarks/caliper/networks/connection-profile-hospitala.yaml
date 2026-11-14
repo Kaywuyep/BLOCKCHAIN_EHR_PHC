@@ -1,0 +1,34 @@
+# Common connection profile for HospitalA, used by networks/fabric-network.yaml.
+#
+# The peer container publishes 7051 on the host, so Caliper dials
+# localhost:7051 and overrides the TLS server name to the certificate's
+# hostname (same approach as FABRIC_PEER_ENDPOINT / FABRIC_PEER_HOST_ALIAS in
+# backend/.env.example). If your grpc build ignores the override, add
+#   127.0.0.1 peer0.hospitala.patientchain.local
+# to /etc/hosts and change the url to grpcs://peer0.hospitala.patientchain.local:7051.
+
+name: patientchain-hospitala
+version: 1.0.0
+
+client:
+  organization: HospitalA
+  connection:
+    timeout:
+      peer:
+        endorser: "300"
+
+organizations:
+  HospitalA:
+    mspid: HospitalAMSP
+    peers:
+      - peer0.hospitala.patientchain.local
+
+peers:
+  peer0.hospitala.patientchain.local:
+    url: grpcs://localhost:7051
+    tlsCACerts:
+      # Resolved against the Caliper workspace (benchmarks/caliper/).
+      path: ../../network/crypto-config/peerOrganizations/hospitala.patientchain.local/peers/peer0.hospitala.patientchain.local/tls/ca.crt
+    grpcOptions:
+      ssl-target-name-override: peer0.hospitala.patientchain.local
+      hostnameOverride: peer0.hospitala.patientchain.local

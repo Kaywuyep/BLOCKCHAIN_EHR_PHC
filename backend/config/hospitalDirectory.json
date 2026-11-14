@@ -1,0 +1,32 @@
+[
+  {
+    "hospitalID": "general-hospital-langtang",
+    "name": "General Hospital Langtang",
+    "location": "Langtang, Plateau State",
+    "type": "General Hospital"
+  },
+  {
+    "hospitalID": "general-hospital-wase",
+    "name": "General Hospital Wase",
+    "location": "Wase, Plateau State",
+    "type": "General Hospital"
+  },
+  {
+    "hospitalID": "jos-university-teaching-hospital",
+    "name": "Jos University Teaching Hospital (JUTH)",
+    "location": "Jos, Plateau State",
+    "type": "Teaching Hospital"
+  },
+  {
+    "hospitalID": "plateau-specialist-hospital",
+    "name": "Plateau Specialist Hospital",
+    "location": "Jos, Plateau State",
+    "type": "Specialist Hospital"
+  },
+  {
+    "hospitalID": "our-lady-of-apostles-hospital",
+    "name": "Our Lady of Apostles Hospital",
+    "location": "Jos, Plateau State",
+    "type": "Faith-based Hospital"
+  }
+]

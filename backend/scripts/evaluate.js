@@ -22,7 +22,7 @@
  *
  * Start the backend first, with MLLP listeners for hospital-a/hospital-b:
  *
- *   HOSPITAL_INGESTION_CONFIG=config/hospitalIngestion.ab.json \
+ *   DEMO_SEED=off HOSPITAL_INGESTION_CONFIG=config/hospitalIngestion.ab.json \
  *   HL7_MLLP_ENABLED=true LEDGER_MODE=fabric PORT=4600 node src/server.js
  *
  * then:
@@ -195,18 +195,18 @@ async function phaseHl7(patients) {
 async function phaseCrossFacility(patients) {
   const providers = {
     // A Hospital B clinician who needs Hospital A's records, and vice versa.
-    // Hospital RBAC (Level 2) is checked against the roster of the hospital
-    // that holds the records, so each is registered there as a visiting
-    // clinician by that hospital's admin.
+    // Each is registered at their OWN hospital (homeOf): Cevruni only
+    // mediates access between facilities, and hospital RBAC is checked at
+    // the requesting clinician's hospital.
     'B->A': { providerID: `dr-hb-${RUN}`, recordsAt: 'hospital-a', homeOf: 'hospital-b' },
     'A->B': { providerID: `dr-ha-${RUN}`, recordsAt: 'hospital-b', homeOf: 'hospital-a' },
   };
   for (const p of Object.values(providers)) {
     await api('POST', '/api/providers/register', {
       providerID: p.providerID,
-      hospitalID: p.recordsAt,
+      hospitalID: p.homeOf,
       name: p.providerID,
-      role: 'Visiting Physician',
+      role: 'Physician',
       department: 'Referral',
     });
   }
@@ -265,6 +265,7 @@ async function phaseCrossFacility(patients) {
         patientDID: p.did,
         providerID: prov.providerID,
         hospitalID: prov.recordsAt,
+        requesterHospitalID: prov.homeOf,
         scope: ['Patient', 'Encounter'],
         purpose: 'Referral',
       });
@@ -315,6 +316,7 @@ async function phaseCrossFacility(patients) {
       patientDID: p0.did,
       providerID: prov.providerID,
       hospitalID: 'hospital-a',
+      requesterHospitalID: prov.homeOf,
       scope: ['Encounter'],
       purpose: 'Referral',
     });
@@ -325,12 +327,12 @@ async function phaseCrossFacility(patients) {
     await api('POST', `/api/access/${grantID}/revoke`, {});
 
     const g2 = randomUUID();
-    await api('POST', '/api/access/request', { grantID: g2, patientDID: p0.did, providerID: `dr-unregistered-${RUN}`, hospitalID: 'hospital-a' });
+    await api('POST', '/api/access/request', { grantID: g2, patientDID: p0.did, providerID: `dr-unregistered-${RUN}`, hospitalID: 'hospital-a', requesterHospitalID: 'hospital-b' });
     await api('POST', `/api/access/${g2}/grant`, { durationMinutes: 30 });
     neg.unregisteredProvider = (await api('GET', `/api/records/resolve?grantID=${g2}&hospitalID=hospital-a`)).status;
 
     const g3 = randomUUID();
-    await api('POST', '/api/access/request', { grantID: g3, patientDID: p0.did, providerID: prov.providerID, hospitalID: 'hospital-a' });
+    await api('POST', '/api/access/request', { grantID: g3, patientDID: p0.did, providerID: prov.providerID, hospitalID: 'hospital-a', requesterHospitalID: prov.homeOf });
     neg.pendingNotYetGranted = (await api('GET', `/api/records/resolve?grantID=${g3}&hospitalID=hospital-a`)).status;
 
     // Identity linkage: wrong DOB and wrong number must look identical.
@@ -369,6 +371,7 @@ async function phaseBreakGlass(patients) {
       patientDID: p.did,
       providerID: `dr-er-${RUN}`,
       hospitalID: 'hospital-a',
+      requesterHospitalID: 'hospital-b',
       justification: 'Unconscious patient, emergency department',
     });
     lat.push(r.ms);

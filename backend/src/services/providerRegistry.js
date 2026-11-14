@@ -25,6 +25,7 @@ class ProviderRegistry {
                                ON CONFLICT (hospital_id, provider_id) DO UPDATE SET data = excluded.data, status = excluded.status`),
       get: this.db.prepare('SELECT data FROM providers WHERE hospital_id = ? AND provider_id = ?'),
       forHospital: this.db.prepare('SELECT data FROM providers WHERE hospital_id = ? ORDER BY provider_id'),
+      byProvider: this.db.prepare('SELECT data FROM providers WHERE provider_id = ? ORDER BY registered_at'),
     };
   }
 
@@ -53,6 +54,11 @@ class ProviderRegistry {
   get(providerID, hospitalID) {
     const row = this.sql.get.get(hospitalID, providerID);
     return row ? JSON.parse(row.data) : null;
+  }
+
+  /** Every hospital a provider ID is registered at. */
+  registrationsOf(providerID) {
+    return this.sql.byProvider.all(providerID).map((row) => JSON.parse(row.data));
   }
 
   getForHospital(hospitalID) {

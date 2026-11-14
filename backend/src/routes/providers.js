@@ -22,6 +22,15 @@ function providersRouter(providerRegistry) {
     }
   });
 
+  // Clinician retrieves their own provider profile (name, role, department)
+  router.get('/me', (req, res) => {
+    const { providerID, hospitalID } = req.user;
+    if (!providerID || !hospitalID) return res.status(404).json({ error: 'not a registered provider' });
+    const provider = providerRegistry.get(providerID, hospitalID);
+    if (!provider) return res.status(404).json({ error: 'provider not registered at this hospital' });
+    res.json(provider);
+  });
+
   router.get('/hospital/:hospitalID', (req, res) => {
     if (!actsForHospital(req.user, req.params.hospitalID, ROLES.HOSPITAL_ADMIN)) return deny(res);
     res.json(providerRegistry.getForHospital(req.params.hospitalID));

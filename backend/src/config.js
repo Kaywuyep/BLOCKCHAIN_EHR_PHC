@@ -63,6 +63,8 @@ function loadConfig(env = process.env) {
       corsOrigins: list(env.CORS_ORIGINS),
       trustProxy: env.TRUST_PROXY || '',
       tlsCertPath: env.TLS_CERT_PATH || '',
+      // TLS 1.3 by default (Table 3.8); TLS_MIN_VERSION=TLSv1.2 only for old clients.
+      tlsMinVersion: env.TLS_MIN_VERSION || 'TLSv1.3',
       tlsKeyPath: env.TLS_KEY_PATH || '',
       jsonLimit: env.JSON_BODY_LIMIT || '100kb',
       rateLimitPerMinute: int(env.RATE_LIMIT_PER_MINUTE, 300),

@@ -4,6 +4,7 @@ const fs = require('fs');
 const grpc = require('@grpc/grpc-js');
 const { connect, signers } = require('@hyperledger/fabric-gateway');
 const crypto = require('crypto');
+const { EventEmitter } = require('events');
 
 const utf8Decoder = new TextDecoder();
 
@@ -39,6 +40,16 @@ class FabricLedgerService {
     this.cfg = cfg;
     this.gateway = null;
     this.contract = null;
+    // Chaincode events, pushed to subscribers (the SSE stream) and kept in
+    // a small buffer for the admin "recent events" list.
+    this.eventLog = [];
+    this.events = new EventEmitter();
+    this.events.setMaxListeners(0);
+  }
+
+  onEvent(listener) {
+    this.events.on('event', listener);
+    return () => this.events.off('event', listener);
   }
 
   async connect() {
@@ -62,10 +73,48 @@ class FabricLedgerService {
 
     const network = this.gateway.getNetwork(this.cfg.channelName);
     this.contract = network.getContract(this.cfg.chaincodeName);
+    this.network = network;
+    this._listenForEvents(network);
     return this;
   }
 
+  /**
+   * Event-driven updates (Section 3.4.4): subscribes to the chaincode's own
+   * events (AccessRequested, AccessGranted, AccessRevoked, BreakGlass...,
+   * AuditEntryWritten) through the Gateway instead of polling the ledger.
+   * Reconnects with a short backoff if the stream drops.
+   */
+  async _listenForEvents(network) {
+    this._eventsClosed = false;
+    let backoff = 1000;
+    while (!this._eventsClosed && this.network === network) {
+      try {
+        this._eventStream = await network.getChaincodeEvents(this.cfg.chaincodeName);
+        backoff = 1000;
+        for await (const ev of this._eventStream) {
+          let payload = null;
+          try {
+            payload = JSON.parse(utf8Decoder.decode(ev.payload));
+          } catch {
+            payload = null;
+          }
+          const evt = { type: ev.eventName, payload, timestamp: new Date().toISOString(), txID: ev.transactionId, block: String(ev.blockNumber) };
+          this.eventLog.push(evt);
+          if (this.eventLog.length > 500) this.eventLog.shift();
+          this.events.emit('event', evt);
+        }
+      } catch (err) {
+        if (this._eventsClosed) return;
+        this.events.emit('stream-error', err);
+      }
+      await new Promise((r) => setTimeout(r, backoff));
+      backoff = Math.min(backoff * 2, 30000);
+    }
+  }
+
   close() {
+    this._eventsClosed = true;
+    this._eventStream?.close?.();
     this.gateway?.close();
     this.client?.close();
     this._closeSigner?.();
@@ -178,7 +227,7 @@ class FabricLedgerService {
   // scope is JSON-encoded because Fabric chaincode arguments are plain
   // strings; the chaincode decodes it back into []string (see
   // accesscontrol.go's RequestAccess).
-  async requestAccess({ grantID, patientDID, providerID, hospitalID, scope, purpose }) {
+  async requestAccess({ grantID, patientDID, providerID, hospitalID, scope, purpose, providerRole, requesterHospitalID }) {
     await this._submit(
       'AccessControlContract',
       'RequestAccess',
@@ -187,17 +236,31 @@ class FabricLedgerService {
       providerID,
       hospitalID,
       JSON.stringify(scope || []),
-      purpose || 'Treatment'
+      purpose || 'Treatment',
+      providerRole || '',
+      requesterHospitalID || ''
     );
     return this.checkAccess({ grantID });
   }
-  async grantAccess({ grantID, durationMinutes }) {
-    await this._submit('AccessControlContract', 'GrantAccess', grantID, String(durationMinutes));
+  async grantAccess({ grantID, durationMinutes, signature }) {
+    await this._submit('AccessControlContract', 'GrantAccess', grantID, String(durationMinutes), signature || '');
     return this.checkAccess({ grantID });
   }
-  async revokeAccess({ grantID }) {
-    await this._submit('AccessControlContract', 'RevokeAccess', grantID);
+  /** Several approvals in ONE transaction (Section 3.4.4). */
+  async grantAccessBatch(items) {
+    const clean = items.map(({ grantID, durationMinutes, signature }) => ({ grantID, durationMinutes, signature: signature || '' }));
+    await this._submit('AccessControlContract', 'GrantAccessBatch', JSON.stringify(clean));
+    return Promise.all(clean.map(({ grantID }) => this.checkAccess({ grantID })));
+  }
+  async revokeAccess({ grantID, signature }) {
+    await this._submit('AccessControlContract', 'RevokeAccess', grantID, signature || '');
     return this.checkAccess({ grantID });
+  }
+  async getGrantsForProvider(providerID) {
+    return (await this._evaluate('AccessControlContract', 'GetGrantsForProvider', providerID)) || [];
+  }
+  async getGrantsForHospital(hospitalID) {
+    return (await this._evaluate('AccessControlContract', 'GetGrantsForHospital', hospitalID)) || [];
   }
   checkAccess({ grantID }) {
     return this._evaluate('AccessControlContract', 'CheckAccess', grantID);
@@ -205,9 +268,19 @@ class FabricLedgerService {
   getGrantsForPatient(patientDID) {
     return this._evaluate('AccessControlContract', 'GetGrantsForPatient', patientDID);
   }
-  async breakGlassAccess({ grantID, patientDID, providerID, hospitalID, justification }) {
-    await this._submit('AccessControlContract', 'BreakGlassAccess', grantID, patientDID, providerID, hospitalID, justification);
+  async breakGlassAccess({ grantID, patientDID, providerID, hospitalID, requesterHospitalID, justification, representativeHash }) {
+    await this._submit('AccessControlContract', 'BreakGlassAccess', grantID, patientDID, providerID, hospitalID, requesterHospitalID || '', justification, representativeHash || '');
     return this.checkAccess({ grantID });
+  }
+  async extendBreakGlass({ grantID, providerID, reason, minutes }) {
+    await this._submit('AccessControlContract', 'ExtendBreakGlass', grantID, providerID, reason, String(minutes));
+    return this.checkAccess({ grantID });
+  }
+  async getGrantsByRequesterHospital(hospitalID) {
+    return (await this._evaluate('AccessControlContract', 'GetGrantsByRequesterHospital', hospitalID)) || [];
+  }
+  async getAuditTrailForActor(actorID) {
+    return (await this._evaluate('AuditLogContract', 'GetAuditTrailForActor', actorID)) || [];
   }
   async reviewBreakGlass({ grantID, reviewerID, notes }) {
     await this._submit('AccessControlContract', 'ReviewBreakGlass', grantID, reviewerID, notes || '');
@@ -238,18 +311,18 @@ class FabricLedgerService {
   getAuditTrailForPatient(patientDID) {
     return this._evaluate('AuditLogContract', 'GetAuditTrailForPatient', patientDID);
   }
+  async getAuditTrailForHospital(hospitalID) {
+    return (await this._evaluate('AuditLogContract', 'GetAuditTrailForHospital', hospitalID)) || [];
+  }
 
   // ---------- CostMetrics ----------
   async getCounters() {
     return this._evaluate('CostMetricsContract', 'GetCounters');
   }
 
-  // Fabric has no polling-friendly "recent events" query out of the box;
-  // a production build would use the Gateway's chaincode event stream
-  // (contract.network.getChaincodeEvents) and buffer it server-side. Not
-  // implemented in this MVP backend -- see docs/ARCHITECTURE.md.
-  getRecentEvents() {
-    return [];
+  /** Most recent chaincode events first, from the live event stream. */
+  getRecentEvents(limit = 50) {
+    return this.eventLog.slice(-limit).reverse();
   }
 }
 

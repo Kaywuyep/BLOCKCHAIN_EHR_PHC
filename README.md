@@ -1,4 +1,4 @@
-# PatientChain
+# CEVRUNI: Your Health. Your Records. Your Control.
 
 A blockchain-based patient-controlled access and reference system for cross-hospital health record
 interoperability in resource-constrained environments — the implementation of the architecture proposed in

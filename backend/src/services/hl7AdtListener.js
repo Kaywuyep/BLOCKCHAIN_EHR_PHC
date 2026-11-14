@@ -258,6 +258,7 @@ function mapAdtMessageToResources(message, { log = console, fieldMap } = {}) {
   // signal: no class, no encounter.
   const patientClass = field('patientClass');
   let encounterResource = null;
+  let practitionerResource = null;
   if (patientClass) {
     const pointOfCare = field('pointOfCare');
     const room = field('room');
@@ -286,9 +287,18 @@ function mapAdtMessageToResources(message, { log = console, fieldMap } = {}) {
       encounterResource.location = [{ location: { display: locationDisplay } }];
     }
     if (attendingId || attendingFamily) {
+      // Table 3.6 "Administrative": the attending clinician as a FHIR
+      // Practitioner, referenced from the Encounter.
+      practitionerResource = {
+        resourceType: 'Practitioner',
+        id: randomUUID(),
+        identifier: attendingId ? [{ value: attendingId }] : [],
+        name: [{ family: attendingFamily || undefined, given: attendingGiven ? [attendingGiven] : undefined, text: [attendingGiven, attendingFamily].filter(Boolean).join(' ') }],
+      };
       encounterResource.participant = [
         {
           individual: {
+            reference: `Practitioner/${practitionerResource.id}`,
             identifier: { value: attendingId },
             display: [attendingGiven, attendingFamily].filter(Boolean).join(' '),
           },
@@ -303,6 +313,7 @@ function mapAdtMessageToResources(message, { log = console, fieldMap } = {}) {
     hospitalNumber,
     patient: { name: fullName, dob, sex: hl7SexToFhirGender(sexRaw), sourceResource: patientResource },
     encounterResource,
+    practitionerResource,
   };
 }
 
@@ -330,7 +341,12 @@ function ingestParsedMessage(fhirAdapter, hospitalID, message, { log = console, 
 
   let encounterRecorded = false;
   if (mapped.encounterResource) {
-    fhirAdapter.recordResourceByHospitalNumber(hospitalID, mapped.hospitalNumber, mapped.encounterResource);
+    // The Encounter carries its Practitioner (and the hospital as
+    // serviceProvider Organization) in the same bundle, so they travel
+    // together and one on-chain pointer covers the visit.
+    mapped.encounterResource.serviceProvider = mapped.encounterResource.serviceProvider || { reference: `Organization/${hospitalID}`, display: hospitalID };
+    const extra = [mapped.practitionerResource, { resourceType: 'Organization', id: hospitalID, identifier: [{ value: hospitalID }], name: hospitalID }].filter(Boolean);
+    fhirAdapter.recordResourceByHospitalNumber(hospitalID, mapped.hospitalNumber, mapped.encounterResource, extra);
     encounterRecorded = true;
   }
 

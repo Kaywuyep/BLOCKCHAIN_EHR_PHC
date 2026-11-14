@@ -98,7 +98,8 @@ class OfflineQueue {
         this.markSynced(item.id);
         results.push({ id: item.id, status: 'SYNCED', result });
       } catch (err) {
-        if (err.permanent) {
+        // A bad patient signature can never become valid on retry.
+        if (err.permanent || /signature/.test(err.message)) {
           // Never valid: replaying it again would fail the same way.
           this.db.prepare(`UPDATE queue SET status = 'REJECTED', synced_at = ? WHERE id = ?`).run(new Date().toISOString(), item.id);
           results.push({ id: item.id, status: 'REJECTED', error: err.message });
@@ -122,7 +123,32 @@ class OfflineQueue {
         throw err;
       }
     }
+    if (payload.actorPatientDID && actionType === 'GRANT_ACCESS_BATCH') {
+      for (const it of payload.items || []) {
+        const grant = await ledger.checkAccess({ grantID: it.grantID });
+        if (!grant || grant.patientDID !== payload.actorPatientDID) {
+          const err = new Error('queued action rejected: a grant in the batch does not belong to the patient who queued it');
+          err.permanent = true;
+          throw err;
+        }
+      }
+    }
     switch (actionType) {
+      case 'GRANT_ACCESS_BATCH': {
+        const grants = await ledger.grantAccessBatch(payload.items);
+        for (const g of grants) {
+          await ledger.writeAuditEntry({
+            patientDID: g.patientDID,
+            eventType: 'GRANT_ISSUED',
+            actorID: g.patientDID,
+            hospitalID: g.hospitalID,
+            detail: `Batch approval queued while offline at ${clientTimestamp}`,
+            clientTimestamp,
+            queuedOffline: true,
+          });
+        }
+        return grants;
+      }
       case 'REQUEST_ACCESS':
         return ledger.requestAccess(payload);
       case 'GRANT_ACCESS':

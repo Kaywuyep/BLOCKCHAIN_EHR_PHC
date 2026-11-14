@@ -26,6 +26,7 @@ const COLUMNS = [
   ['local_patient_index', 'data_enc', ['hospital_id', 'hospital_number']],
   ['clinical_bundles', 'bundle_enc', ['id']],
   ['hl7_messages', 'raw_enc', ['id']],
+  ['hospitals', 'fhir_secret_enc', ['hospital_id']],
 ];
 
 const config = loadConfig();
@@ -39,7 +40,7 @@ let total = 0;
 for (const [table, column, keys] of COLUMNS) {
   const rows = db.prepare(`SELECT ${keys.join(', ')}, ${column} AS v FROM ${table}`).all();
   const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${keys.map((k) => `${k} = ?`).join(' AND ')}`);
-  const stale = rows.filter((r) => cipher.needsRotation(r.v));
+  const stale = rows.filter((r) => r.v != null && cipher.needsRotation(r.v));
   db.transaction(() => {
     for (const r of stale) update.run(cipher.encrypt(cipher.decrypt(r.v)), ...keys.map((k) => r[k]));
   })();

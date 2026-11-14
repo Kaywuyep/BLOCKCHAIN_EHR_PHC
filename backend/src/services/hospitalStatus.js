@@ -5,19 +5,36 @@
 const hospitals = new Map();
 
 function configureHospital({ hospitalID, mode, mllpPort, hl7Version }) {
+  const previous = hospitals.get(hospitalID);
   hospitals.set(hospitalID, {
+    ...(previous || {}),
     hospitalID,
     mode: mode || 'manual',
     mllpPort: mllpPort || null,
     hl7Version: hl7Version || null,
     status: 'starting',
-    messagesReceived: 0,
-    messagesAccepted: 0,
-    messagesRejected: 0,
-    lastMessageAt: null,
-    lastMessageStatus: null,
+    // Reconfiguring a hospital keeps its message counters.
+    messagesReceived: previous ? previous.messagesReceived : 0,
+    messagesAccepted: previous ? previous.messagesAccepted : 0,
+    messagesRejected: previous ? previous.messagesRejected : 0,
+    lastMessageAt: previous ? previous.lastMessageAt : null,
+    lastMessageStatus: previous ? previous.lastMessageStatus : null,
     error: null,
   });
+}
+
+function restoreCounters(hospitalID, counters) {
+  const item = hospitals.get(hospitalID);
+  if (item) Object.assign(item, counters);
+}
+
+function removeHospital(hospitalID) {
+  hospitals.delete(hospitalID);
+}
+
+function getHospitalStatus(hospitalID) {
+  const item = hospitals.get(hospitalID);
+  return item ? { ...item } : null;
 }
 
 function markDisabled(hospitalID, reason = 'listener disabled') {
@@ -44,6 +61,7 @@ function markError(hospitalID, error) {
 function recordMessage(hospitalID, result) {
   const item = hospitals.get(hospitalID);
   if (!item) return;
+  if (item.status === 'starting' || item.status === 'disabled') item.status = item.mllpPort ? item.status : 'receiving';
   item.messagesReceived += 1;
   if (result.ok) item.messagesAccepted += 1;
   else item.messagesRejected += 1;
@@ -62,4 +80,7 @@ module.exports = {
   markError,
   recordMessage,
   getHospitalStatuses,
+  getHospitalStatus,
+  removeHospital,
+  restoreCounters,
 };

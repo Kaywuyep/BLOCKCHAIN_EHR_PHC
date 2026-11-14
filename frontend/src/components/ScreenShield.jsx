@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './ScreenShield.css';
+import { reportScreenCapture } from './screenCaptureAudit';
 
 /**
  * ScreenShield
@@ -10,23 +11,31 @@ import './ScreenShield.css';
  * What a web page can and cannot do here:
  * - A browser page gets no event when the operating system takes a
  *   screenshot, and cannot stop one. This component is a best-effort
- *   deterrent, not a guarantee. A phone camera pointed at the screen, or
- *   a capture taken while the window keeps focus, is out of reach.
+ *   deterrent, not a guarantee. Screenshot tools started from a menu or
+ *   button, screen recorders, and phone cameras are out of reach.
  * - What it does catch:
  *     1. the window losing focus or being hidden: snipping tools, screen
  *        recorders, screen-share pickers and app switchers usually take
- *        focus first;
- *     2. the screenshot shortcuts the page can see: PrintScreen,
- *        Cmd+Shift+3/4/5/6 (macOS), Win+Shift+S (Windows), and
- *        Ctrl/Cmd+P for printing;
+ *        focus first. This noise clears itself when the window is focused
+ *        again;
+ *     2. screenshot shortcuts the page can see: PrintScreen, and
+ *        Cmd+Shift+3/4/5/6 (macOS) / Win+Shift+S (Windows). The noise is
+ *        raised as soon as Cmd/Win+Shift is held, because the OS usually
+ *        swallows the final key. If the page then receives a non-capture
+ *        key, it was an ordinary shortcut and the noise is removed;
  *     3. printing and "Save as PDF": the print stylesheet swaps the page
- *        for a noise pattern (see ScreenShield.css);
+ *        for a noise pattern (see ScreenShield.css).
  *   After PrintScreen it also overwrites the clipboard, which is where
  *   Windows puts that capture, when the browser allows it.
  *
- * A shortcut-triggered shield stays up until the user clicks it, so the
- * noise is still on screen while an area-selection tool is open. A
- * focus-triggered shield clears itself once the window is focused again.
+ * Every attempt is reported to the backend audit log (screenCaptureAudit.js):
+ * "confirmed" when the page saw the capture key, "suspected" when
+ * Cmd/Win+Shift was pressed and released with no other key reaching the
+ * page, which is what an OS-consumed screenshot shortcut looks like.
+ *
+ * The noise clears itself after a few seconds, or on click. If a capture
+ * tool has taken focus (an area-selection overlay), it stays up until the
+ * window is focused again.
  *
  * Set VITE_SCREEN_SHIELD=off to disable it, e.g. for UI screenshots in
  * documentation.
@@ -39,16 +48,30 @@ const ENABLED = (import.meta.env.VITE_SCREEN_SHIELD || 'on').toLowerCase() !== '
 // keeps the per-frame cost tiny.
 const GRAIN = 3;
 
-function isCaptureShortcut(e) {
-  if (e.key === 'PrintScreen' || e.code === 'PrintScreen') return true;
+// How long the noise stays up after a screenshot shortcut.
+const HOLD_MS = 3000;
+// Extra delay after the window regains focus from a capture tool.
+const REFOCUS_GRACE_MS = 500;
+
+function isPrintScreen(e) {
+  return e.key === 'PrintScreen' || e.code === 'PrintScreen';
+}
+
+// Which OS shortcut a Cmd/Win+Shift chord belongs to, for the audit log.
+const CHORD_METHOD = /mac/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+  ? 'mac-shortcut'
+  : 'windows-snip';
+
+function isModifier(e) {
+  return ['Meta', 'OS', 'Shift'].includes(e.key);
+}
+
+// macOS: Cmd+Shift+3/4/5/6 (shifted symbols on some layouts);
+// Windows Snipping Tool: Win+Shift+S.
+function isCaptureKey(e) {
   const key = (e.key || '').toLowerCase();
-  // macOS: Cmd+Shift+3 / 4 / 5 / 6
-  if (e.metaKey && e.shiftKey && ['3', '4', '5', '6', '#', '$', '%', '^'].includes(key)) return true;
-  // Windows Snipping Tool: Win+Shift+S
-  if (e.metaKey && e.shiftKey && key === 's') return true;
-  // Print / Save as PDF
-  if ((e.ctrlKey || e.metaKey) && key === 'p') return true;
-  return false;
+  return ['3', '4', '5', '6', '#', '$', '%', '^', 's'].includes(key)
+    || ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'KeyS'].includes(e.code);
 }
 
 function NoiseCanvas() {
@@ -91,53 +114,124 @@ function NoiseCanvas() {
 }
 
 export function ScreenShield({ children }) {
-  // null = not shielded; 'focus' = cleared automatically on refocus;
-  // 'shortcut' = cleared only by an explicit click.
-  const [reason, setReason] = useState(null);
+  // null = not shielded; 'focus' = window lost focus, cleared on refocus;
+  // 'shortcut' = screenshot shortcut or print, cleared by timer or click.
+  const [mode, setMode] = useState(null);
+  const shielded = ENABLED && mode !== null;
+  const timerRef = useRef(null);
+  const waitingForFocusRef = useRef(false);
 
-  const shield = useCallback((why) => {
-    setReason((current) => (current === 'shortcut' ? current : why));
+  const hide = useCallback(() => {
+    clearTimeout(timerRef.current);
+    waitingForFocusRef.current = false;
+    setMode(null);
   }, []);
+
+  // Show the noise for HOLD_MS. If a capture tool has taken focus by then
+  // (e.g. an area-selection overlay), keep it up until the window is
+  // focused again, then clear shortly after.
+  const show = useCallback(() => {
+    clearTimeout(timerRef.current);
+    waitingForFocusRef.current = false;
+    setMode('shortcut');
+    timerRef.current = setTimeout(() => {
+      if (document.hasFocus()) hide();
+      else waitingForFocusRef.current = true;
+    }, HOLD_MS);
+  }, [hide]);
 
   useEffect(() => {
     if (!ENABLED) return undefined;
 
-    const onBlur = () => shield('focus');
-    const onFocus = () => setReason((current) => (current === 'focus' ? null : current));
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') shield('focus');
+    // True while Cmd/Win+Shift is held and no other key has reached the
+    // page yet: a screenshot shortcut whose final key the OS may consume.
+    let chordPending = false;
+    const resolveChordAsSuspected = () => {
+      if (!chordPending) return;
+      chordPending = false;
+      reportScreenCapture(CHORD_METHOD, 'suspected');
     };
-    const onKey = (e) => {
-      if (!isCaptureShortcut(e)) return;
-      setReason('shortcut');
-      if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+
+    // Losing focus or being hidden: show the noise until the window is
+    // back. A shortcut-triggered shield keeps its own timing.
+    const shieldForFocus = () => setMode((m) => m ?? 'focus');
+    const onFocus = () => {
+      setMode((m) => (m === 'focus' ? null : m));
+      if (!waitingForFocusRef.current) return;
+      waitingForFocusRef.current = false;
+      timerRef.current = setTimeout(hide, REFOCUS_GRACE_MS);
+    };
+    // A capture overlay (Cmd+Shift+5, Win+Shift+S) takes focus before any
+    // key-up arrives.
+    const onBlur = () => {
+      resolveChordAsSuspected();
+      shieldForFocus();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') shieldForFocus();
+      else if (document.hasFocus()) onFocus();
+    };
+
+    const onKeyDown = (e) => {
+      if (isPrintScreen(e)) {
+        show();
+        reportScreenCapture('print-screen');
         // Windows puts a PrintScreen capture on the clipboard; replace it.
         // Browsers only allow this while the page is focused, so it is
         // best-effort.
         navigator.clipboard?.writeText?.('').catch(() => {});
+        return;
+      }
+      if (!(e.metaKey && e.shiftKey)) return;
+      if (isModifier(e)) {
+        // Cmd+Shift (macOS) / Win+Shift (Windows) is held: the OS usually
+        // swallows the final 3/4/5/6/S key, so raise the noise now, before
+        // the capture happens.
+        chordPending = true;
+        show();
+      } else if (isCaptureKey(e)) {
+        chordPending = false;
+        show();
+        reportScreenCapture(CHORD_METHOD, 'confirmed');
+      } else {
+        // The page received a non-capture key (e.g. Cmd+Shift+T), so this
+        // was an ordinary shortcut, not a screenshot.
+        chordPending = false;
+        hide();
       }
     };
-    const onBeforePrint = () => setReason('shortcut');
+    const onKeyUp = (e) => {
+      // Windows often delivers PrintScreen only as a keyup.
+      if (isPrintScreen(e)) {
+        show();
+        reportScreenCapture('print-screen');
+        return;
+      }
+      // The chord was released with no other key reaching the page.
+      if (chordPending && !(e.metaKey && e.shiftKey)) resolveChordAsSuspected();
+    };
+    const onBeforePrint = () => {
+      show();
+      reportScreenCapture('print');
+    };
 
-    window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
     // Capture phase, so an input that stops propagation can't hide the key.
-    window.addEventListener('keydown', onKey, true);
-    // Windows often delivers PrintScreen only as a keyup.
-    window.addEventListener('keyup', onKey, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
     window.addEventListener('beforeprint', onBeforePrint);
     return () => {
-      window.removeEventListener('blur', onBlur);
+      clearTimeout(timerRef.current);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('keyup', onKey, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('beforeprint', onBeforePrint);
     };
-  }, [shield]);
-
-  const shielded = ENABLED && reason !== null;
+  }, [show, hide]);
 
   return (
     <>
@@ -155,12 +249,12 @@ export function ScreenShield({ children }) {
           role="alertdialog"
           aria-label="Screen hidden to protect patient data"
           data-testid="screen-shield"
-          onClick={() => setReason(null)}
+          onClick={hide}
         >
           <NoiseCanvas />
           <div className="screen-shield-message">
             <strong>Screen hidden to protect patient data</strong>
-            <span>{reason === 'shortcut' ? 'Click anywhere to return.' : 'Return to this window to continue.'}</span>
+            <span>{mode === 'focus' ? 'Return to this window to continue.' : 'Click anywhere to return.'}</span>
           </div>
         </div>
       )}

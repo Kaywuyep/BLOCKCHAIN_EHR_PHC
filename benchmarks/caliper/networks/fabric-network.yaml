@@ -1,0 +1,44 @@
+# Caliper 0.6 Fabric connector configuration for the PatientChain pilot network.
+#
+# Binding: fabric:2.5 (= @hyperledger/fabric-gateway). Caliper connects to ONE
+# gateway peer (peer0.hospitala) and that peer's Fabric Gateway service
+# collects the second endorsement from peer0.hospitalb itself, inside the
+# docker network -- the same path the backend's fabricLedgerService.js uses.
+# The channel's default endorsement policy is "MAJORITY Endorsement", i.e.
+# both hospitals (k = 2 in the cost model).
+#
+# Every relative path below is resolved against the Caliper workspace
+# (benchmarks/caliper/), so ../../network/... is the repo's network/ folder.
+# network-up.sh regenerates crypto-config/ with cryptogen on every run; the
+# file NAMES (including keystore/priv_sk) stay the same, so nothing here needs
+# editing after the network is recreated.
+
+name: patientchain-caliper
+version: "2.0.0"
+
+caliper:
+  blockchain: fabric
+  sutOptions:
+    # The peers run server-side TLS only (no client-auth), and the peer
+    # gateway connector does not support mutual TLS anyway.
+    mutualTls: false
+
+channels:
+  - channelName: patientchainchannel
+    contracts:
+      # One chaincode, four contracts: functions are addressed as
+      # "<ContractName>:<Function>" in the workload modules.
+      - id: patientchain
+
+organizations:
+  - mspid: HospitalAMSP
+    identities:
+      certificates:
+        - name: User1
+          clientPrivateKey:
+            path: ../../network/crypto-config/peerOrganizations/hospitala.patientchain.local/users/User1@hospitala.patientchain.local/msp/keystore/priv_sk
+          clientSignedCert:
+            path: ../../network/crypto-config/peerOrganizations/hospitala.patientchain.local/users/User1@hospitala.patientchain.local/msp/signcerts/User1@hospitala.patientchain.local-cert.pem
+    connectionProfile:
+      path: networks/connection-profile-hospitala.yaml
+      discover: true

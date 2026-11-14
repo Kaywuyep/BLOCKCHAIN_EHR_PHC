@@ -4,7 +4,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const { ROLES, hasRole, actsForHospital, isPatientSelf, deny } = require('../auth/policy');
 
-function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore = null) {
+function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore = null, referenceService = null) {
   const router = express.Router();
 
   // ledger.getPatient() throws (synchronously, in simulated mode; via a
@@ -19,6 +19,24 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
       return null;
     }
   }
+
+  // FR1 step 1: before a patient has a DID, they look up the record at the
+  // first hospital they registered with (hospital number + date of birth).
+  // Same generic answer and rate limit as link-facility.
+  router.post('/register/lookup', (req, res) => {
+    const user = req.user;
+    if (!hasRole(user, ROLES.PATIENT)) return deny(res, 'requires role: patient');
+    const { hospitalID, hospitalNumber, dateOfBirth } = req.body || {};
+    if (!hospitalID || !hospitalNumber || !dateOfBirth) {
+      return res.status(400).json({ error: 'hospitalID, hospitalNumber and dateOfBirth are required' });
+    }
+    try {
+      res.json(linkageService.linkFacility(`pending:${user.sub}`, hospitalID, hospitalNumber, dateOfBirth));
+    } catch (err) {
+      if (err.message.startsWith('too many lookup attempts')) return res.status(429).json({ error: err.message });
+      res.status(404).json({ error: err.message });
+    }
+  });
 
   // Register a new patient DID on-chain, and (separately, off-chain) at a
   // hospital's local patient index -- mirroring how a real deployment
@@ -45,6 +63,21 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
       if (req.body.mrn || req.body.hospitalID) {
         return deny(res, 'patients link a hospital record through link-facility, not at registration');
       }
+      // FR1: a new patient's DID is registered only after identity
+      // resolution at their first hospital (register/lookup, then confirm
+      // here with the same hospital and number).
+      if (!user.patientDID) {
+        const first = req.body.firstFacility || {};
+        if (!first.hospitalID || !first.hospitalNumber) {
+          return res.status(400).json({ error: 'confirm your record at your first hospital (hospital number and date of birth) before creating your Health ID' });
+        }
+        const linkedTo = fhirAdapter.findDidByHospitalNumber(first.hospitalID, first.hospitalNumber);
+        if (linkedTo) return res.status(409).json({ error: 'this hospital record is already linked to a Health ID' });
+        if (!linkageService.consumePending(`pending:${user.sub}`, first.hospitalID, first.hospitalNumber)) {
+          return res.status(400).json({ error: 'no confirmed match pending for that hospital number -- look it up again first' });
+        }
+        req.firstFacility = first;
+      }
     } else if (req.body.hospitalID && !actsForHospital(user, req.body.hospitalID, ROLES.HOSPITAL_ADMIN)) {
       return deny(res, 'hospital staff can only register patients at their own hospital');
     }
@@ -65,6 +98,12 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
       if (asPatient && identityStore) identityStore.bind(user.sub, patientDID);
 
       const response = { patient };
+      if (req.firstFacility) {
+        const { hospitalID, hospitalNumber } = req.firstFacility;
+        fhirAdapter.registerLocalPatient(hospitalID, patientDID, hospitalNumber);
+        response.firstFacility = { hospitalID, hospitalNumber };
+        if (referenceService) response.references = (await referenceService.registerExisting(hospitalID, patientDID, hospitalNumber)).length;
+      }
       if (req.body.hospitalID) {
         const mrn = fhirAdapter.registerLocalPatient(req.body.hospitalID, patientDID, req.body.mrn);
         response.localHospitalMrn = mrn;
@@ -132,7 +171,7 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
   // link-facility and explicitly confirmed it's them. Records the DID
   // <-> hospital-number mapping locally via the FHIR Adapter -- never
   // on-chain.
-  router.post('/:did/confirm-link', (req, res) => {
+  router.post('/:did/confirm-link', async (req, res) => {
     if (!isPatientSelf(req.user, req.params.did)) return deny(res, 'patients can only link facilities to their own DID');
     try {
       const { hospitalID, hospitalNumber } = req.body;
@@ -140,10 +179,47 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
         return res.status(400).json({ error: 'hospitalID and hospitalNumber are required' });
       }
       const result = linkageService.confirmLink(req.params.did, hospitalID, hospitalNumber);
+      // Pointers for the records this hospital already holds (FR3).
+      if (referenceService) result.references = (await referenceService.registerExisting(hospitalID, req.params.did, hospitalNumber)).length;
       res.status(201).json(result);
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // Clinician looks up a patient by their hospital number at the clinician's
+  // hospital. Returns the patient's DID and name if found — this is how a
+  // clinician finds a patient without knowing the raw DID.
+  router.get('/lookup-by-hospital-number/:hospitalID/:hospitalNumber', (req, res) => {
+    if (!hasRole(req.user, ROLES.CLINICIAN, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) {
+      return deny(res, 'requires clinician, hospital_admin or system_admin role');
+    }
+    const { hospitalID, hospitalNumber } = req.params;
+    // A clinician looks patients up at their OWN hospital only. Finding a
+    // patient by another hospital's number is part of break-glass, where it
+    // is justified and logged.
+    if (!actsForHospital(req.user, hospitalID, ROLES.CLINICIAN, ROLES.HOSPITAL_ADMIN)) {
+      return deny(res, 'you can only look up patients by your own hospital\'s numbers');
+    }
+    const patientDID = fhirAdapter.findDidByHospitalNumber(hospitalID, hospitalNumber);
+    if (!patientDID) {
+      return res.status(404).json({ error: 'No patient with that hospital number is linked in Cevruni' });
+    }
+    // Also get the patient's name from the local roster for display
+    const localRecord = fhirAdapter.findLocalPatientRecord(hospitalID, hospitalNumber);
+    // The other hospitals in the patient's network: where Cevruni can
+    // request records from (never their hospital numbers there).
+    const network = fhirAdapter
+      .listLinksForPatient(patientDID)
+      .filter((l) => l.hospitalID !== hospitalID)
+      .map((l) => ({ hospitalID: l.hospitalID }));
+    res.json({
+      patientDID,
+      hospitalNumber,
+      hospitalID,
+      name: localRecord ? localRecord.name : null,
+      network,
+    });
   });
 
   router.get('/:did', async (req, res) => {
@@ -183,6 +259,13 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // The hospitals this patient has linked (from each hospital's local
+  // DID-to-MRN mapping; never on-chain).
+  router.get('/:did/facilities', (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did)) return deny(res);
+    res.json(fhirAdapter.listLinksForPatient(req.params.did));
   });
 
   router.get('/:did/references', async (req, res) => {

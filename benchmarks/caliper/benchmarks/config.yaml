@@ -1,0 +1,256 @@
+# Caliper benchmark configuration for PatientChain -- full sweep (one run per batch size b)
+#
+# Round labels: <function>-r<TPS> (fixed-rate) and <function>-max (saturating fixed-load).
+#
+# How the rounds map to the batch size b (orderer BatchSize.MaxMessageCount):
+#   A block is cut when it holds MaxMessageCount transactions OR when
+#   BatchTimeout (2s in network/configtx.yaml) expires, whichever is first.
+#   At send rate R the effective block size is therefore about
+#       b_eff = min(MaxMessageCount, R x BatchTimeout)
+#   so the fixed-rate rounds fill blocks to different sizes (r10 -> <=20 txs,
+#   r25 -> <=50, r50 -> <=100 per block), and the -max rounds (fixed-load) saturate
+#   the pipeline so blocks are always cut by count (b_eff = MaxMessageCount).
+#   scripts/fit-curve.js fits Caction(b) = (Ce + Cv) + Co/b to the -max rounds
+#   (ms of ledger time per committed transaction = 1000 / throughput).
+#
+# `arguments.txNumber` repeats the round's txNumber because Caliper does not
+# hand txNumber to workload modules, and the modules size their
+# prerequisites (pending/active grants) from it. Keep the two equal.
+#
+# Prerequisite transactions (patients, pending requests, active grants) are
+# sent during each round's initialisation and are NOT part of the results.
+
+test:
+  name: patientchain-caction
+  description: PatientChain per-action ledger cost Caction(b) across send rates (Section 3.4.4 / Table 3.9)
+  workers:
+    number: 2
+
+  # Shared workload arguments (see workload/common.js for all options).
+  commonArgs: &common
+    contractId: patientchain
+    invokerIdentity: User1
+    invokerMspId: HospitalAMSP
+    hospitalID: hospital-a
+    providerRole: Physician
+    purpose: Treatment
+    durationMinutes: 60
+    patientPool: 5
+    prereqConcurrency: 25
+
+  # Saturating controller for the -max rounds: keeps `transactionLoad`
+  # transactions in flight (split across workers), several times the largest
+  # MaxMessageCount in the sweep, so the orderer always has a full batch
+  # waiting and blocks are cut by count, not by BatchTimeout. The round's
+  # throughput is then the pipeline's capacity at batch size b.
+  saturateRate: &saturate
+    type: fixed-load
+    opts:
+      transactionLoad: 150
+      startTps: 50
+
+  rounds:
+    # ---- PatientRegistryContract:RegisterPatient ---------------------
+    - label: registerPatient-r10
+      description: PatientRegistryContract:RegisterPatient at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/registerPatient.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: registerPatient-r25
+      description: PatientRegistryContract:RegisterPatient at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/registerPatient.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: registerPatient-r50
+      description: PatientRegistryContract:RegisterPatient at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/registerPatient.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: registerPatient-max
+      description: PatientRegistryContract:RegisterPatient under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/registerPatient.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- PatientRegistryContract:RegisterRecordReference -------------
+    - label: registerRecordReference-r10
+      description: PatientRegistryContract:RegisterRecordReference at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/registerRecordReference.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: registerRecordReference-r25
+      description: PatientRegistryContract:RegisterRecordReference at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/registerRecordReference.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: registerRecordReference-r50
+      description: PatientRegistryContract:RegisterRecordReference at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/registerRecordReference.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: registerRecordReference-max
+      description: PatientRegistryContract:RegisterRecordReference under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/registerRecordReference.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- AccessControlContract:RequestAccess -------------------------
+    - label: requestAccess-r10
+      description: AccessControlContract:RequestAccess at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/requestAccess.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: requestAccess-r25
+      description: AccessControlContract:RequestAccess at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/requestAccess.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: requestAccess-r50
+      description: AccessControlContract:RequestAccess at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/requestAccess.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: requestAccess-max
+      description: AccessControlContract:RequestAccess under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/requestAccess.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- AccessControlContract:GrantAccess ---------------------------
+    - label: grantAccess-r10
+      description: AccessControlContract:GrantAccess at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/grantAccess.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: grantAccess-r25
+      description: AccessControlContract:GrantAccess at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/grantAccess.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: grantAccess-r50
+      description: AccessControlContract:GrantAccess at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/grantAccess.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: grantAccess-max
+      description: AccessControlContract:GrantAccess under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/grantAccess.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- AccessControlContract:RevokeAccess --------------------------
+    - label: revokeAccess-r10
+      description: AccessControlContract:RevokeAccess at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/revokeAccess.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: revokeAccess-r25
+      description: AccessControlContract:RevokeAccess at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/revokeAccess.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: revokeAccess-r50
+      description: AccessControlContract:RevokeAccess at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/revokeAccess.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: revokeAccess-max
+      description: AccessControlContract:RevokeAccess under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/revokeAccess.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- AuditLogContract:WriteAuditEntry ----------------------------
+    - label: writeAuditEntry-r10
+      description: AuditLogContract:WriteAuditEntry at a fixed 10 TPS
+      txNumber: 150
+      rateControl: { type: fixed-rate, opts: { tps: 10 } }
+      workload:
+        module: workload/writeAuditEntry.js
+        arguments: { <<: *common, txNumber: 150 }
+    - label: writeAuditEntry-r25
+      description: AuditLogContract:WriteAuditEntry at a fixed 25 TPS
+      txNumber: 250
+      rateControl: { type: fixed-rate, opts: { tps: 25 } }
+      workload:
+        module: workload/writeAuditEntry.js
+        arguments: { <<: *common, txNumber: 250 }
+    - label: writeAuditEntry-r50
+      description: AuditLogContract:WriteAuditEntry at a fixed 50 TPS
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/writeAuditEntry.js
+        arguments: { <<: *common, txNumber: 500 }
+    - label: writeAuditEntry-max
+      description: AuditLogContract:WriteAuditEntry under saturating fixed load (pipeline capacity; used for the Caction(b) fit)
+      txNumber: 1500
+      rateControl: *saturate
+      workload:
+        module: workload/writeAuditEntry.js
+        arguments: { <<: *common, txNumber: 1500 }
+    # ---- AccessControlContract:CheckAccess (query) --------------
+    - label: checkAccess-r50
+      description: AccessControlContract:CheckAccess query at a fixed 50 TPS (approximates Ce; independent of b)
+      txNumber: 500
+      rateControl: { type: fixed-rate, opts: { tps: 50 } }
+      workload:
+        module: workload/checkAccess.js
+        arguments: { <<: *common, txNumber: 500, grantsToQuery: 20 }
+    - label: checkAccess-r100
+      description: AccessControlContract:CheckAccess query at a fixed 100 TPS (approximates Ce; independent of b)
+      txNumber: 1000
+      rateControl: { type: fixed-rate, opts: { tps: 100 } }
+      workload:
+        module: workload/checkAccess.js
+        arguments: { <<: *common, txNumber: 1000, grantsToQuery: 20 }
+
+# Docker resource usage of the Fabric containers (CPU/memory columns of
+# the report); needs read access to /var/run/docker.sock.
+monitors:
+  resource:
+    - module: docker
+      options:
+        interval: 5
+        containers:
+          - orderer.patientchain.local
+          - peer0.hospitala.patientchain.local
+          - peer0.hospitalb.patientchain.local
+      charting:
+        bar:
+          metrics: [Memory(avg), CPU%(avg)]

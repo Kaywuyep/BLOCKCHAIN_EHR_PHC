@@ -38,12 +38,23 @@ async function world() {
 
   await adminA.post('/providers/register', { providerID: 'dr-a', hospitalID: H_A });
   await adminB.post('/providers/register', { providerID: 'dr-b', hospitalID: H_B });
-  const registered = await patient.post('/patients/register', {});
+  // FR1: a patient's DID is registered only after confirming their record
+  // at their first hospital (hospital number + date of birth).
+  server.fhirAdapter.addLocalPatientRecord(H_A, 'A-100', { name: 'Amina Yusuf', dob: '1995-03-15' });
+  server.fhirAdapter.addLocalPatientRecord(H_B, 'B-200', { name: 'Bola Ade', dob: '1990-01-01' });
+  await patient.post('/patients/register/lookup', { hospitalID: H_A, hospitalNumber: 'A-100', dateOfBirth: '1995-03-15' });
+  const registered = await patient.post('/patients/register', { firstFacility: { hospitalID: H_A, hospitalNumber: 'A-100' } });
   const did = registered.body.patient.patientDID;
-  await otherPatient.post('/patients/register', {});
-  const requested = await drA.post('/access/request', { patientDID: did, providerID: 'dr-a', hospitalID: H_A });
+  await otherPatient.post('/patients/register/lookup', { hospitalID: H_B, hospitalNumber: 'B-200', dateOfBirth: '1990-01-01' });
+  await otherPatient.post('/patients/register', { firstFacility: { hospitalID: H_B, hospitalNumber: 'B-200' } });
+  // Amina also has Hospital B in her network; Dr A (Hospital A) asks for
+  // her Hospital B records. Hospital C is an outsider.
+  server.fhirAdapter.addLocalPatientRecord(H_B, 'B-100', { name: 'Amina Yusuf', dob: '1995-03-15' });
+  server.fhirAdapter.registerLocalPatient(H_B, did, 'B-100');
+  const adminC = await as({ subject: 'admin-c', role: 'hospital_admin', hospitalID: 'hospital-c' });
+  const requested = await drA.post('/access/request', { patientDID: did, providerID: 'dr-a', hospitalID: H_B });
 
-  return { server, sysadmin, adminA, adminB, drA, drB, patient, otherPatient, did, grantID: requested.body.grantID, anon: client(server.baseUrl) };
+  return { server, sysadmin, adminA, adminB, adminC, drA, drB, patient, otherPatient, did, grantID: requested.body.grantID, anon: client(server.baseUrl) };
 }
 
 test('API calls without a token get 401; health and readiness stay public', async () => {
@@ -87,13 +98,13 @@ test('registration binds the patient account to the minted DID, and a patient ca
   }
 });
 
-test('a clinician can only request access as themselves at their own hospital', async () => {
+test('a clinician can only request, as themselves, records held at another hospital', async () => {
   const w = await world();
   try {
     assert.equal(w.grantID && typeof w.grantID, 'string');
     assert.equal((await w.drA.post('/access/request', { patientDID: w.did, providerID: 'dr-b', hospitalID: H_B })).status, 403);
-    assert.equal((await w.drA.post('/access/request', { patientDID: w.did, providerID: 'dr-a', hospitalID: H_B })).status, 403);
-    assert.equal((await w.patient.post('/access/request', { patientDID: w.did, providerID: 'dr-a', hospitalID: H_A })).status, 403);
+    assert.equal((await w.drA.post('/access/request', { patientDID: w.did, providerID: 'dr-a', hospitalID: H_A })).status, 400);
+    assert.equal((await w.patient.post('/access/request', { patientDID: w.did, providerID: 'dr-a', hospitalID: H_B })).status, 403);
   } finally {
     await w.server.close();
   }
@@ -115,9 +126,8 @@ test('only the patient who owns a grant can approve or revoke it', async () => {
 test('records resolve only for the clinician named on the grant -- knowing the grant ID is not enough', async () => {
   const w = await world();
   try {
-    w.server.fhirAdapter.registerLocalPatient(H_A, w.did, 'A-001');
     await w.patient.post(`/access/${w.grantID}/grant`, { durationMinutes: 30 });
-    const path = `/records/resolve?grantID=${w.grantID}&hospitalID=${H_A}`;
+    const path = `/records/resolve?grantID=${w.grantID}&hospitalID=${H_B}`;
     assert.equal((await w.drB.get(path)).status, 403);
     assert.equal((await w.adminA.get(path)).status, 403);
     assert.equal((await w.patient.get(path)).status, 403);
@@ -127,11 +137,11 @@ test('records resolve only for the clinician named on the grant -- knowing the g
   }
 });
 
-test('grant details are visible to its patient, its clinician and its hospital\'s admins only', async () => {
+test('grant details are visible to its patient, its clinician and both hospitals\' admins only', async () => {
   const w = await world();
   try {
-    for (const c of [w.patient, w.drA, w.adminA, w.sysadmin]) assert.equal((await c.get(`/access/${w.grantID}`)).status, 200);
-    for (const c of [w.otherPatient, w.drB, w.adminB]) assert.equal((await c.get(`/access/${w.grantID}`)).status, 403);
+    for (const c of [w.patient, w.drA, w.adminA, w.adminB, w.sysadmin]) assert.equal((await c.get(`/access/${w.grantID}`)).status, 200);
+    for (const c of [w.otherPatient, w.drB, w.adminC]) assert.equal((await c.get(`/access/${w.grantID}`)).status, 403);
   } finally {
     await w.server.close();
   }
@@ -148,17 +158,20 @@ test('audit trails: a patient sees their own, not someone else\'s', async () => 
   }
 });
 
-test('break-glass: only the clinician themselves can invoke it, only their hospital\'s admin can review it, and the reviewer is the token identity', async () => {
+test('break-glass: a clinician opens another hospital\'s records by its number; both hospitals\' admins see it and either can review; the reviewer is the token identity', async () => {
   const w = await world();
   try {
-    const body = { patientDID: w.did, providerID: 'dr-a', hospitalID: H_A, justification: 'unconscious in ER' };
-    assert.equal((await w.drB.post('/access/break-glass', body)).status, 403);
+    const body = { hospitalID: H_B, hospitalNumber: 'B-100', justification: 'unconscious in ER' };
+    assert.equal((await w.drB.post('/access/break-glass', body)).status, 400, 'own hospital: use the EMR');
+    assert.equal((await w.patient.post('/access/break-glass', body)).status, 403);
     const bg = await w.drA.post('/access/break-glass', body);
     assert.equal(bg.status, 201);
+    assert.equal(bg.body.providerID, 'dr-a', 'the clinician comes from the token, not the body');
 
-    assert.equal((await w.adminB.get('/access/break-glass/pending')).body.length, 0);
+    assert.equal((await w.adminC.get('/access/break-glass/pending')).body.length, 0);
     assert.equal((await w.adminA.get('/access/break-glass/pending')).body.length, 1);
-    assert.equal((await w.adminB.post(`/access/${bg.body.grantID}/review`, { notes: 'ok' })).status, 403);
+    assert.equal((await w.adminB.get('/access/break-glass/pending')).body.length, 1);
+    assert.equal((await w.adminC.post(`/access/${bg.body.grantID}/review`, { notes: 'ok' })).status, 403);
     const reviewed = await w.adminA.post(`/access/${bg.body.grantID}/review`, { reviewerID: 'someone-else', notes: 'justified' });
     assert.equal(reviewed.status, 200);
     assert.equal(reviewed.body.reviewedBy || reviewed.body.reviewerID, 'admin-a');

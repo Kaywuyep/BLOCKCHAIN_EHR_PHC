@@ -90,6 +90,18 @@ class LinkageService {
    * the DID <-> hospital-number mapping in fhirAdapter's existing local
    * index -- never on-chain, and never a new store of its own.
    */
+  /**
+   * For first-time registration (FR1): the lookup was made before the
+   * patient had a DID, under a provisional key. Consumes that pending
+   * match; returns true if it was there.
+   */
+  consumePending(provisionalID, hospitalID, hospitalNumber) {
+    const key = `${provisionalID}::${hospitalID}`;
+    if (this.pendingLinks.get(key) !== hospitalNumber) return false;
+    this.pendingLinks.delete(key);
+    return true;
+  }
+
   confirmLink(patientDID, hospitalID, hospitalNumber) {
     if (!patientDID || !hospitalID || !hospitalNumber) {
       throw new Error('patientDID, hospitalID and hospitalNumber are all required');
@@ -100,6 +112,11 @@ class LinkageService {
       throw new Error('no confirmed match pending for that hospital number -- look it up again first');
     }
     this.pendingLinks.delete(key);
+
+    const existing = this.fhirAdapter.findDidByHospitalNumber(hospitalID, hospitalNumber);
+    if (existing && existing !== patientDID) {
+      throw new Error('this hospital record is already linked to another Health ID -- ask the hospital to check it');
+    }
 
     const linkedHospitalNumber = this.fhirAdapter.registerLocalPatient(hospitalID, patientDID, hospitalNumber);
     return { patientDID, hospitalID, hospitalNumber: linkedHospitalNumber };

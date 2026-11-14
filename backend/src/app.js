@@ -15,6 +15,10 @@ const { costRouter } = require('./routes/cost');
 const { syncRouter } = require('./routes/sync');
 const { hl7Router } = require('./routes/hl7');
 const { hospitalsRouter } = require('./routes/hospitals');
+const { adminRouter } = require('./routes/admin');
+const { ingestRouter } = require('./routes/ingest');
+const { eventsRouter } = require('./routes/events');
+const { hospitalAdminRouter } = require('./routes/hospitalAdmin');
 const { ALL_ROLES } = require('./auth/auth');
 const { createMetrics } = require('./metrics');
 
@@ -42,6 +46,12 @@ function createApp({
   inbox = null,
   identityStore = null,
   db = null,
+  hospitalRegistry = null,
+  userDirectory = null,
+  listenerManager = null,
+  referenceService = null,
+  demoFhir = false,
+  cipher = null,
   startedAt = Date.now(),
 }) {
   const app = express();
@@ -189,19 +199,52 @@ function createApp({
       return res.status(400).json({ error: 'subject is required (letters, digits, . _ - @ :)' });
     }
     if (!ALL_ROLES.has(role)) return res.status(400).json({ error: `role must be one of ${[...ALL_ROLES].join(', ')}` });
-    if (['clinician', 'hospital_admin', 'hl7_interface'].includes(role) && !hospitalID) {
+    const account = userDirectory ? userDirectory.getAccount(subject) : null;
+    if (account && account.status === 'disabled') return res.status(403).json({ error: 'this account is disabled' });
+    // Accounts a system admin created have fixed roles and hospital.
+    if (account && account.source === 'created') {
+      if (!account.roles.includes(role)) {
+        return res.status(403).json({ error: `this account has the role(s): ${account.roles.join(', ')}` });
+      }
+      if (account.hospitalID && hospitalID && hospitalID !== account.hospitalID) {
+        return res.status(403).json({ error: `this account belongs to hospital ${account.hospitalID}` });
+      }
+    }
+    const effectiveHospital = hospitalID || (account && account.source === 'created' ? account.hospitalID : null);
+    if (['clinician', 'hospital_admin', 'hl7_interface'].includes(role) && !effectiveHospital) {
       return res.status(400).json({ error: 'hospitalID is required for hospital staff' });
     }
     const token = await auth.issueLocalToken({
       sub: subject,
       roles: [role],
-      hospitalID,
+      hospitalID: effectiveHospital || undefined,
       providerID: role === 'clinician' ? providerID || subject : undefined,
     });
     res.json({ token, expiresIn: config.auth.tokenTtlSeconds });
   });
 
+  // Demo FHIR server standing in for JUTH's EMR (development only).
+  if (demoFhir && !config.production) {
+    app.use('/demo-fhir', require('./demo/mockFhirServer').mockFhirRouter());
+  }
+
   app.use('/api', auth.authenticate);
+
+  // Disabled accounts are refused even with a valid token; everyone else
+  // is recorded in the user directory (last seen, roles, hospital).
+  if (userDirectory) {
+    app.use('/api', (req, res, next) => {
+      if (req.user && !req.user.superuser && userDirectory.isDisabled(req.user.sub)) {
+        return res.status(403).json({ error: 'this account is disabled' });
+      }
+      try {
+        userDirectory.recordSignIn(req.user);
+      } catch (err) {
+        logger.warn('user directory update failed', { requestId: req.id, err });
+      }
+      return next();
+    });
+  }
 
   app.get('/api/auth/me', (req, res) => {
     const { sub, roles, hospitalID, providerID, patientDID, superuser } = req.user;
@@ -209,15 +252,21 @@ function createApp({
   });
 
   // ── API ────────────────────────────────────────────────────────────────
-  app.use('/api/patients', patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore));
+  app.use('/api/patients', patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore, referenceService));
   app.use('/api/providers', providersRouter(providerRegistry));
-  app.use('/api/access', accessRouter(ledgerPromise, offlineQueue));
-  app.use('/api/records', recordsRouter(ledgerPromise, fhirAdapter, providerRegistry));
-  app.use('/api/audit', auditRouter(ledgerPromise));
+  app.use('/api/access', accessRouter(ledgerPromise, offlineQueue, providerRegistry, fhirAdapter, { db, cipher, hospitalRegistry }));
+  app.use('/api/records', recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry));
+  app.use('/api/audit', auditRouter(ledgerPromise, { db, logger }));
   app.use('/api/cost', costRouter(ledgerPromise, startedAt));
   app.use('/api/sync', syncRouter(ledgerPromise, offlineQueue));
-  app.use('/api/hl7', hl7Router(fhirAdapter, inbox));
-  app.use('/api/hospitals', hospitalsRouter());
+  app.use('/api/hl7', hl7Router(fhirAdapter, inbox, hospitalRegistry));
+  app.use('/api/hospitals', hospitalsRouter(hospitalRegistry));
+  app.use('/api/ingest', ingestRouter(fhirAdapter, hospitalRegistry));
+  app.use('/api/events', eventsRouter(ledgerPromise));
+  app.use('/api/hospital-admin', hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, db, cipher }));
+  if (hospitalRegistry && userDirectory && listenerManager) {
+    app.use('/api/admin', adminRouter({ registry: hospitalRegistry, users: userDirectory, listenerManager }));
+  }
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'not found' }));
 

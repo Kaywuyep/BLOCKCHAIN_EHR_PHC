@@ -75,6 +75,86 @@ const MIGRATIONS = [
   CREATE UNIQUE INDEX hl7_messages_dedupe ON hl7_messages (hospital_id, control_id) WHERE control_id IS NOT NULL AND control_id <> '';
   CREATE INDEX hl7_messages_by_status ON hl7_messages (status, next_attempt_at);
   `,
+  // Screen-capture attempts seen by the frontend's ScreenShield. The
+  // tamper-evident copy is the SCREEN_CAPTURE_ATTEMPT ledger audit entry;
+  // this table lets hospital admins list attempts across all patients.
+  `
+  CREATE TABLE screen_capture_attempts (
+    id          TEXT PRIMARY KEY,
+    occurred_at TEXT NOT NULL,
+    actor_id    TEXT NOT NULL,
+    role        TEXT,
+    hospital_id TEXT,
+    patient_did TEXT,
+    method      TEXT NOT NULL,
+    confidence  TEXT NOT NULL,
+    page        TEXT,
+    ledger_entry_id TEXT
+  );
+  CREATE INDEX screen_capture_by_hospital ON screen_capture_attempts (hospital_id, occurred_at);
+  `,
+  // Hospital registry, managed from the System Admin UI. Replaces the
+  // hand-edited config/hospitalDirectory.json + hospitalIngestion.json,
+  // which are imported once when this table is empty.
+  // integration: fhir | hl7 | both | manual. fhir_json / hl7_json hold the
+  // non-secret connection settings; the FHIR client secret is encrypted.
+  //
+  // User directory: every identity that has signed in (source 'seen') or
+  // that a system admin created ahead of first sign-in (source 'created').
+  // status 'disabled' blocks sign-in at the API.
+  `
+  CREATE TABLE hospitals (
+    hospital_id     TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    location        TEXT NOT NULL DEFAULT '',
+    type            TEXT NOT NULL DEFAULT '',
+    integration     TEXT NOT NULL,
+    fhir_json       TEXT,
+    fhir_secret_enc TEXT,
+    hl7_json        TEXT,
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    created_by      TEXT
+  );
+  CREATE TABLE users (
+    subject       TEXT PRIMARY KEY,
+    display_name  TEXT,
+    roles         TEXT NOT NULL,
+    hospital_id   TEXT,
+    provider_id   TEXT,
+    status        TEXT NOT NULL DEFAULT 'active',
+    source        TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    created_by    TEXT,
+    last_seen_at  TEXT
+  );
+  CREATE INDEX users_by_hospital ON users (hospital_id);
+  `,
+  // Who asked for an emergency (break-glass) access on behalf of an
+  // unresponsive patient (NHA 2014 s.26(2)(d)). Encrypted; only a salted
+  // hash goes on-chain.
+  `
+  CREATE TABLE emergency_representatives (
+    grant_id     TEXT PRIMARY KEY,
+    details_enc  TEXT NOT NULL,
+    details_hash TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+  );
+  `,
+  // Emergency-access notes kept OFF-chain (Section 3.4.7): the clinician's
+  // justification, the family member / representative, and each extension
+  // reason. Encrypted; the ledger holds only "sha256:<hash>" of each note.
+  `
+  CREATE TABLE emergency_notes (
+    hash        TEXT PRIMARY KEY,
+    grant_id    TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    details_enc TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX emergency_notes_by_grant ON emergency_notes (grant_id);
+  `,
 ];
 
 function migrate(db) {

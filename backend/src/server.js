@@ -17,9 +17,12 @@ const { LinkageService } = require('./services/linkageService');
 const { ProviderRegistry } = require('./services/providerRegistry');
 const { OfflineQueue } = require('./sync/offlineQueue');
 const { Hl7Inbox } = require('./services/hl7Inbox');
-const { startMllpListener, resolveFieldMap } = require('./services/hl7AdtListener');
 const { loadHospitalIngestionConfig } = require('./services/hospitalIngestionConfig');
-const { configureHospital, markDisabled, markListening, markError, recordMessage } = require('./services/hospitalStatus');
+const { recordMessage } = require('./services/hospitalStatus');
+const { HospitalRegistry } = require('./services/hospitalRegistry');
+const { ReferenceService } = require('./services/referenceService');
+const { UserDirectory } = require('./services/userDirectory');
+const { Hl7ListenerManager } = require('./services/hl7ListenerManager');
 
 const config = loadConfig();
 
@@ -45,24 +48,34 @@ if (config.encryptionKeys) {
 const startedAt = Date.now();
 const ledgerPromise = getLedgerService();
 const fhirAdapter = new FhirAdapter({ db, cipher });
+
+
 const providerRegistry = new ProviderRegistry({ db });
+
+
 const linkageService = new LinkageService(fhirAdapter);
 const offlineQueue = new OfflineQueue(process.env.SYNC_QUEUE_DB_PATH || require('path').join(config.dataDir, 'sync-queue.sqlite'));
 const identityStore = new IdentityStore(db);
 const auth = createAuth(config.auth, { identityStore });
 
-// ── HL7 ingestion ───────────────────────────────────────────────────────
-const ingestionConfig = loadHospitalIngestionConfig();
-for (const [hospitalID, cfg] of Object.entries(ingestionConfig)) {
-  if (hospitalID.startsWith('_')) continue;
-  if (cfg.fieldMap) resolveFieldMap(cfg.fieldMap); // fail fast on a bad mapping
-}
+// ── Hospital registry + user directory ─────────────────────────────────
+// Hospitals are managed in the System Admin UI. On first start the old
+// config files (hospitalDirectory.json, hospitalIngestion.json) are
+// imported once.
+const hospitalRegistry = new HospitalRegistry({ db, cipher, production: config.production });
+const imported = hospitalRegistry.importLegacyConfig({ ingestionConfig: loadHospitalIngestionConfig() });
+if (imported) logger.info(`imported ${imported} hospital(s) from config files into the hospital registry`);
+const userDirectory = new UserDirectory({ db });
+// FR3: on-chain pointers registered at the point of care.
+const referenceService = new ReferenceService({ ledgerPromise, fhirAdapter, logger }).attach();
 
+// ── HL7 ingestion ───────────────────────────────────────────────────────
 const inbox = new Hl7Inbox({
   db,
   cipher,
   fhirAdapter,
-  hospitalOptions: (hospitalID) => ({ fieldMap: ingestionConfig[hospitalID]?.fieldMap }),
+  // Read per message, so a field-mapping change in the UI applies at once.
+  hospitalOptions: (hospitalID) => ({ fieldMap: hospitalRegistry.fieldMapFor(hospitalID) }),
   onResult: (hospitalID, result) => recordMessage(hospitalID, result),
   log: logger.child({ component: 'hl7' }).asConsole(),
   maxAttempts: config.hl7.maxAttempts,
@@ -79,42 +92,25 @@ if (config.hl7.tlsCertPath && config.hl7.tlsKeyPath) {
   };
 }
 
-const mllpListeners = [];
-// Opt-in: only starts MLLP listeners for hospitals actually configured for
-// HL7 ingestion (config/hospitalIngestion.json) and only when explicitly
-// enabled -- local dev runs should never bind TCP ports nobody asked for.
-for (const [hospitalID, cfg] of Object.entries(ingestionConfig)) {
-  if (hospitalID.startsWith('_')) continue;
-  configureHospital({ hospitalID, ...cfg });
-  if (cfg.mode !== 'hl7' || !cfg.mllpPort) {
-    markDisabled(hospitalID, 'not configured for HL7/MLLP');
-    continue;
-  }
-  if (!config.hl7.mllpEnabled) {
-    markDisabled(hospitalID, 'HL7_MLLP_ENABLED is not true');
-    continue;
-  }
-  const hl7Log = logger.child({ component: 'mllp', hospitalID });
-  const listener = startMllpListener({
-    inbox,
-    hospitalID,
-    port: cfg.mllpPort,
-    version: cfg.hl7Version || '2.5',
-    tls: mllpTls,
-    allowedIps: cfg.allowedIps || [],
-    bindAddress: cfg.bindAddress,
-    log: {
-      log: (...args) => {
-        markListening(hospitalID);
-        hl7Log.info(args.join(' '));
-      },
-      warn: (...args) => {
-        if (args.some((arg) => String(arg).includes('listener error'))) markError(hospitalID, args.at(-1));
-        hl7Log.warn(args.join(' '));
-      },
-    },
-  });
-  mllpListeners.push(listener);
+// One MLLP listener per active HL7 hospital, only when HL7_MLLP_ENABLED=true.
+// Hospitals added or edited in the admin UI are (re)started on save.
+const listenerManager = new Hl7ListenerManager({
+  registry: hospitalRegistry,
+  inbox,
+  mllpEnabled: config.hl7.mllpEnabled,
+  tls: mllpTls,
+  logger,
+});
+listenerManager.syncAll().catch((err) => logger.error('starting HL7 listeners failed', { err }));
+
+// ── Demo data (development only; DEMO_SEED=off to disable) ─────────────
+const demoEnabled = !config.production && (process.env.DEMO_SEED || 'on').toLowerCase() !== 'off';
+if (demoEnabled) {
+  const { runDemoSeed } = require('./demo/demoSeed');
+  runDemoSeed({
+    db, logger, ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, userDirectory,
+    identityStore, referenceService, listenerManager, inbox, cipher, port: config.port,
+  }).catch((err) => logger.error('demo data failed to load', { err }));
 }
 
 // ── HTTP(S) ─────────────────────────────────────────────────────────────
@@ -130,13 +126,19 @@ const app = createApp({
   inbox,
   identityStore,
   db,
+  hospitalRegistry,
+  userDirectory,
+  listenerManager,
+  referenceService,
+  demoFhir: demoEnabled,
+  cipher,
   startedAt,
 });
 
 const tlsEnabled = config.http.tlsCertPath && config.http.tlsKeyPath;
 const server = tlsEnabled
   ? https.createServer(
-      { cert: fs.readFileSync(config.http.tlsCertPath), key: fs.readFileSync(config.http.tlsKeyPath), minVersion: 'TLSv1.2' },
+      { cert: fs.readFileSync(config.http.tlsCertPath), key: fs.readFileSync(config.http.tlsKeyPath), minVersion: config.http.tlsMinVersion },
       app
     )
   : http.createServer(app);
@@ -170,7 +172,7 @@ async function shutdown(signal) {
   force.unref();
   server.close();
   inbox.stop();
-  await Promise.allSettled(mllpListeners.map((l) => l.close()));
+  await listenerManager.closeAll();
   try {
     (await ledgerPromise).close?.();
   } catch {

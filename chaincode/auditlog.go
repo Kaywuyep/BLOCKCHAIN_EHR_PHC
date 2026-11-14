@@ -24,6 +24,9 @@ const (
 	EventReferenceAdded     AuditEventType = "REFERENCE_ADDED"
 	EventBreakGlassAccess   AuditEventType = "BREAK_GLASS_ACCESS"
 	EventBreakGlassReviewed AuditEventType = "BREAK_GLASS_REVIEWED"
+	// Written by the backend when the frontend sees a screenshot attempt.
+	EventScreenCaptureAttempt AuditEventType = "SCREEN_CAPTURE_ATTEMPT"
+	EventBreakGlassExtended   AuditEventType = "BREAK_GLASS_EXTENDED"
 )
 
 // AuditEntry is one immutable line in the patient's access history.
@@ -92,12 +95,17 @@ func (c *AuditLogContract) WriteAuditEntry(ctx contractapi.TransactionContextInt
 		return err
 	}
 
-	compositeKey, err := ctx.GetStub().CreateCompositeKey("audit~patient", []string{patientDID, entryID})
-	if err != nil {
-		return err
-	}
-	if err := ctx.GetStub().PutState(compositeKey, []byte{0x00}); err != nil {
-		return err
+	for _, idx := range [][]string{{"audit~patient", patientDID}, {"audit~hospital", hospitalID}, {"audit~actor", actorID}} {
+		if idx[1] == "" {
+			continue
+		}
+		compositeKey, err := ctx.GetStub().CreateCompositeKey(idx[0], []string{idx[1], entryID})
+		if err != nil {
+			return err
+		}
+		if err := ctx.GetStub().PutState(compositeKey, []byte{0x00}); err != nil {
+			return err
+		}
 	}
 
 	if err := ctx.GetStub().SetEvent("AuditEntryWritten", entryJSON); err != nil {
@@ -128,6 +136,71 @@ func (c *AuditLogContract) GetAuditTrailForPatient(ctx contractapi.TransactionCo
 		}
 		entryID := keyParts[1]
 		data, err := ctx.GetStub().GetState(auditKey(entryID))
+		if err != nil {
+			return nil, err
+		}
+		var entry AuditEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &entry)
+	}
+	return entries, nil
+}
+
+// GetAuditTrailForActor returns every audit entry an actor (e.g. one
+// clinician) caused, at any hospital -- so a hospital can see what its own
+// staff opened elsewhere.
+func (c *AuditLogContract) GetAuditTrailForActor(ctx contractapi.TransactionContextInterface, actorID string) ([]*AuditEntry, error) {
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey("audit~actor", []string{actorID})
+	if err != nil {
+		return nil, err
+	}
+	defer iterator.Close()
+	var entries []*AuditEntry
+	for iterator.HasNext() {
+		kv, err := iterator.Next()
+		if err != nil {
+			return nil, err
+		}
+		_, keyParts, err := ctx.GetStub().SplitCompositeKey(kv.Key)
+		if err != nil {
+			return nil, err
+		}
+		data, err := ctx.GetStub().GetState(auditKey(keyParts[1]))
+		if err != nil {
+			return nil, err
+		}
+		var entry AuditEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return nil, err
+		}
+		entries = append(entries, &entry)
+	}
+	return entries, nil
+}
+
+// GetAuditTrailForHospital returns every audit entry recorded for one
+// hospital, for that hospital's admin view: who accessed which patient's
+// records there, and every break-glass and grant event.
+func (c *AuditLogContract) GetAuditTrailForHospital(ctx contractapi.TransactionContextInterface, hospitalID string) ([]*AuditEntry, error) {
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey("audit~hospital", []string{hospitalID})
+	if err != nil {
+		return nil, err
+	}
+	defer iterator.Close()
+
+	var entries []*AuditEntry
+	for iterator.HasNext() {
+		kv, err := iterator.Next()
+		if err != nil {
+			return nil, err
+		}
+		_, keyParts, err := ctx.GetStub().SplitCompositeKey(kv.Key)
+		if err != nil {
+			return nil, err
+		}
+		data, err := ctx.GetStub().GetState(auditKey(keyParts[1]))
 		if err != nil {
 			return nil, err
 		}

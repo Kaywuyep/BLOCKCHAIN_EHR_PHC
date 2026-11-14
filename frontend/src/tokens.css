@@ -1,24 +1,38 @@
-:root {
-  /* Color -- clinical ledger palette, deliberately not the AI-default warm-cream/terracotta pairing */
-  --ink: #16233d;          /* deep clinical navy -- primary text, headers */
-  --ink-soft: #3b4a68;     /* secondary text */
-  --parchment: #f6f4ee;    /* page background -- record-paper warmth without cliche cream+clay */
-  --panel: #ffffff;
-  --line: #dcd8cc;         /* hairline dividers, record-paper rule lines */
-  --verdigris: #2d7d76;    /* accent -- ledger stamp / medical teal */
-  --verdigris-dark: #1f5b56;
-  --amber: #b5762a;        /* pending / offline / attention */
-  --amber-bg: #fbf1e2;
-  --sage: #4a7c59;         /* active / success */
-  --sage-bg: #eaf3ec;
-  --rust: #a63d34;         /* revoked / error */
-  --rust-bg: #fbeae8;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-  --font-ui: -apple-system, "Segoe UI", "IBM Plex Sans", Helvetica, Arial, sans-serif;
+:root {
+  /* CEVRUNI brand palette — deep navy, blue-to-purple gradient, teal accent */
+  --ink: #0d1b2a;
+  --ink-soft: #3b4a68;
+  --parchment: #f0f2f7;
+  --panel: #ffffff;
+  --line: #e0e4ec;
+  --brand-blue: #2563eb;
+  --brand-purple: #7c3aed;
+  --brand-teal: #00d4aa;
+  --brand-dark: #0f1729;
+  --brand-gradient: linear-gradient(135deg, #2563eb 0%, #7c3aed 50%, #a855f7 100%);
+  --brand-gradient-subtle: linear-gradient(135deg, rgba(37,99,235,0.08) 0%, rgba(124,58,237,0.08) 100%);
+  --verdigris: #2563eb;
+  --verdigris-dark: #1d4ed8;
+  --amber: #f59e0b;
+  --amber-bg: #fffbeb;
+  --sage: #10b981;
+  --sage-bg: #ecfdf5;
+  --rust: #ef4444;
+  --rust-bg: #fef2f2;
+
+  --font-ui: 'Inter', -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-data: "IBM Plex Mono", "SFMono-Regular", Consolas, Menlo, monospace;
 
-  --radius: 3px;
-  --shadow-panel: 0 1px 2px rgba(22, 35, 61, 0.06), 0 1px 0 rgba(22, 35, 61, 0.04);
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow-panel: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-card: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+
+  --sidebar-width: 260px;
+  --header-height: 64px;
 }
 
 * {
@@ -50,16 +64,16 @@ button {
 }
 
 a {
-  color: var(--verdigris-dark);
+  color: var(--brand-blue);
 }
 
 ::selection {
-  background: var(--verdigris);
+  background: var(--brand-blue);
   color: white;
 }
 
 :focus-visible {
-  outline: 2px solid var(--verdigris);
+  outline: 2px solid var(--brand-blue);
   outline-offset: 2px;
 }
 

@@ -9,6 +9,18 @@ async function postJson(url, body) {
   return fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
 
+// Cevruni only mediates access between facilities, and only for patients
+// who have both hospitals in their network: link each test patient at the
+// record-holding hospital and at the requesting hospital ('HospitalZ').
+const REQUESTER = 'HospitalZ';
+function link(server, did, hospitalID) {
+  for (const h of [hospitalID, REQUESTER]) {
+    const n = `${did}-${h}`;
+    server.fhirAdapter.addLocalPatientRecord(h, n, { name: 'Test Patient', dob: '1990-01-01' });
+    server.fhirAdapter.registerLocalPatient(h, did, n);
+  }
+}
+
 test('POST /api/access/request requires patientDID, providerID and hospitalID', async () => {
   const server = await createTestServer();
   try {
@@ -22,11 +34,12 @@ test('POST /api/access/request requires patientDID, providerID and hospitalID', 
 test('the full grant lifecycle: request -> grant -> revoke, each visible via GET /api/access/:grantID', async () => {
   const server = await createTestServer();
   try {
+    link(server, 'did:p1', 'HospitalA-Lagos');
     const requested = await postJson(`${server.baseUrl}/api/access/request`, {
       grantID: 'g1',
       patientDID: 'did:p1',
       providerID: 'prov-1',
-      hospitalID: 'HospitalA-Lagos',
+      hospitalID: 'HospitalA-Lagos', requesterHospitalID: REQUESTER,
     });
     assert.equal(requested.status, 201);
     assert.equal((await requested.json()).status, 'PENDING');
@@ -59,8 +72,10 @@ test('GET /api/access/:grantID returns 404 for an unknown grant', async () => {
 test('GET /api/access/patient/:did lists only that patient\'s grants', async () => {
   const server = await createTestServer();
   try {
-    await postJson(`${server.baseUrl}/api/access/request`, { grantID: 'g1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA' });
-    await postJson(`${server.baseUrl}/api/access/request`, { grantID: 'g2', patientDID: 'did:p2', providerID: 'prov-2', hospitalID: 'HospitalB' });
+    link(server, 'did:p1', 'HospitalA');
+    link(server, 'did:p2', 'HospitalB');
+    await postJson(`${server.baseUrl}/api/access/request`, { grantID: 'g1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', requesterHospitalID: REQUESTER });
+    await postJson(`${server.baseUrl}/api/access/request`, { grantID: 'g2', patientDID: 'did:p2', providerID: 'prov-2', hospitalID: 'HospitalB', requesterHospitalID: REQUESTER });
 
     const res = await fetch(`${server.baseUrl}/api/access/patient/did:p1`);
     const grants = await res.json();
@@ -74,13 +89,14 @@ test('GET /api/access/patient/:did lists only that patient\'s grants', async () 
 test('requests are queued instead of written to the ledger while offline, then a POST connectivity round trip is unaffected', async () => {
   const server = await createTestServer();
   try {
+    link(server, 'did:p1', 'HospitalA');
     server.offlineQueue.setConnected(false);
 
     const res = await postJson(`${server.baseUrl}/api/access/request`, {
       grantID: 'g1',
       patientDID: 'did:p1',
       providerID: 'prov-1',
-      hospitalID: 'HospitalA',
+      hospitalID: 'HospitalA', requesterHospitalID: REQUESTER,
     });
     assert.equal(res.status, 202);
     const body = await res.json();
@@ -102,10 +118,11 @@ test('requests are queued instead of written to the ledger while offline, then a
 test('POST /api/access/break-glass requires a justification and activates immediately', async () => {
   const server = await createTestServer();
   try {
+    link(server, 'did:p1', 'HospitalA');
     const missingJustification = await postJson(`${server.baseUrl}/api/access/break-glass`, {
       patientDID: 'did:p1',
       providerID: 'prov-1',
-      hospitalID: 'HospitalA',
+      hospitalID: 'HospitalA', requesterHospitalID: REQUESTER,
     });
     assert.equal(missingJustification.status, 400);
 
@@ -113,7 +130,7 @@ test('POST /api/access/break-glass requires a justification and activates immedi
       grantID: 'bg-1',
       patientDID: 'did:p1',
       providerID: 'prov-1',
-      hospitalID: 'HospitalA',
+      hospitalID: 'HospitalA', requesterHospitalID: REQUESTER,
       justification: 'Unconscious patient in ER',
     });
     assert.equal(res.status, 201);
@@ -132,11 +149,12 @@ test('POST /api/access/break-glass requires a justification and activates immedi
 test('the break-glass review queue empties once a grant is reviewed', async () => {
   const server = await createTestServer();
   try {
+    link(server, 'did:p1', 'HospitalA');
     await postJson(`${server.baseUrl}/api/access/break-glass`, {
       grantID: 'bg-1',
       patientDID: 'did:p1',
       providerID: 'prov-1',
-      hospitalID: 'HospitalA',
+      hospitalID: 'HospitalA', requesterHospitalID: REQUESTER,
       justification: 'Emergency',
     });
 

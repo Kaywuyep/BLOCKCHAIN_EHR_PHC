@@ -1,0 +1,19 @@
+# SYNTHETIC example data -- NOT measurements. It exists only to show the CSV
+# format and to test scripts/fit-curve.js without a running network.
+# Generated from Ce + Cv = 18 ms and Co = 40 ms (the current backend
+# DEFAULT_PARAMS) plus a little noise, so the fit should return roughly
+# A ~ 18 and Co ~ 40.
+# value_ms = ms of ledger time per committed transaction (1000 / saturated TPS).
+function,b,value_ms
+requestAccess,1,58.9
+requestAccess,2,37.6
+requestAccess,5,26.3
+requestAccess,10,21.7
+requestAccess,20,20.2
+requestAccess,50,18.7
+writeAuditEntry,1,57.2
+writeAuditEntry,2,38.4
+writeAuditEntry,5,25.6
+writeAuditEntry,10,22.3
+writeAuditEntry,20,19.8
+writeAuditEntry,50,18.9

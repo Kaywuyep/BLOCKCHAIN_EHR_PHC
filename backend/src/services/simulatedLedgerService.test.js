@@ -53,10 +53,11 @@ test('grantAccess refuses a grant that is not PENDING', () => {
   assert.throws(() => ledger.grantAccess({ grantID: 'g1', durationMinutes: 30 }), /not in PENDING state/);
 });
 
-test('revokeAccess refuses a grant that is not ACTIVE', () => {
+test('revokeAccess declines a PENDING request once, then refuses', () => {
   const ledger = new SimulatedLedgerService();
   ledger.requestAccess({ grantID: 'g1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA' });
-  assert.throws(() => ledger.revokeAccess({ grantID: 'g1' }), /not ACTIVE/);
+  assert.equal(ledger.revokeAccess({ grantID: 'g1' }).status, 'REVOKED');
+  assert.throws(() => ledger.revokeAccess({ grantID: 'g1' }), /not ACTIVE or PENDING/);
 });
 
 test('checkAccess lazily expires a grant once its expiry has passed', () => {
@@ -72,7 +73,7 @@ test('checkAccess lazily expires a grant once its expiry has passed', () => {
 test('breakGlassAccess activates immediately, is flagged for mandatory review, and requires a justification', () => {
   const ledger = new SimulatedLedgerService();
   assert.throws(
-    () => ledger.breakGlassAccess({ grantID: 'g1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', justification: '  ' }),
+    () => ledger.breakGlassAccess({ grantID: 'g1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', requesterHospitalID: 'HospitalZ', justification: '  ' }),
     /justification is required/
   );
 
@@ -80,7 +81,7 @@ test('breakGlassAccess activates immediately, is flagged for mandatory review, a
     grantID: 'g2',
     patientDID: 'did:p1',
     providerID: 'prov-1',
-    hospitalID: 'HospitalA',
+    hospitalID: 'HospitalA', requesterHospitalID: 'HospitalZ',
     justification: 'Unconscious patient in ER',
   });
   assert.equal(grant.status, 'ACTIVE');
@@ -94,7 +95,7 @@ test('reviewBreakGlass closes the review loop exactly once and rejects a standar
   ledger.requestAccess({ grantID: 'standard-1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA' });
   assert.throws(() => ledger.reviewBreakGlass({ grantID: 'standard-1', reviewerID: 'admin-1' }), /not a break-glass grant/);
 
-  ledger.breakGlassAccess({ grantID: 'bg-1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', justification: 'Emergency' });
+  ledger.breakGlassAccess({ grantID: 'bg-1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', requesterHospitalID: 'HospitalZ', justification: 'Emergency' });
   const reviewed = ledger.reviewBreakGlass({ grantID: 'bg-1', reviewerID: 'admin-1', notes: 'Confirmed legitimate' });
   assert.equal(reviewed.reviewed, true);
   assert.throws(() => ledger.reviewBreakGlass({ grantID: 'bg-1', reviewerID: 'admin-2' }), /already been reviewed/);
@@ -102,8 +103,8 @@ test('reviewBreakGlass closes the review loop exactly once and rejects a standar
 
 test('getPendingBreakGlassReviews only lists unreviewed break-glass grants', () => {
   const ledger = new SimulatedLedgerService();
-  ledger.breakGlassAccess({ grantID: 'bg-1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', justification: 'Emergency' });
-  ledger.breakGlassAccess({ grantID: 'bg-2', patientDID: 'did:p2', providerID: 'prov-2', hospitalID: 'HospitalB', justification: 'Emergency' });
+  ledger.breakGlassAccess({ grantID: 'bg-1', patientDID: 'did:p1', providerID: 'prov-1', hospitalID: 'HospitalA', requesterHospitalID: 'HospitalZ', justification: 'Emergency' });
+  ledger.breakGlassAccess({ grantID: 'bg-2', patientDID: 'did:p2', providerID: 'prov-2', hospitalID: 'HospitalB', requesterHospitalID: 'HospitalZ', justification: 'Emergency' });
   ledger.reviewBreakGlass({ grantID: 'bg-1', reviewerID: 'admin-1' });
 
   const pending = ledger.getPendingBreakGlassReviews();

@@ -1,0 +1,124 @@
+{
+  "generatedAt": "2026-11-14T12:43:11.977Z",
+  "input": "samples/sample-sweep.csv",
+  "metric": "csv",
+  "fits": {
+    "requestAccess": {
+      "A": 17.861516028237467,
+      "Co": 40.765189214211325,
+      "r2": 0.9994000261051016,
+      "rmse": 0.34602040955449564,
+      "seA": 0.2327211651855582,
+      "seCo": 0.49940854138243185,
+      "n": 6,
+      "distinctB": 6
+    },
+    "writeAuditEntry": {
+      "A": 18.10385834972804,
+      "Co": 39.34590903830576,
+      "r2": 0.9993438569867066,
+      "rmse": 0.3492666500545586,
+      "seA": 0.23490447244370485,
+      "seCo": 0.5040938148181819,
+      "n": 6,
+      "distinctB": 6
+    },
+    "all": {
+      "A": 17.98268718898275,
+      "Co": 40.05554912625855,
+      "r2": 0.9990075273876698,
+      "rmse": 0.43737436957173836,
+      "seA": 0.18604478120031048,
+      "seCo": 0.3992432434625269,
+      "n": 12,
+      "distinctB": 6
+    }
+  },
+  "checkAccessLatencyMs": null,
+  "points": [
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b1",
+      "bNominal": 1,
+      "b": 1,
+      "y": 58.9
+    },
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b2",
+      "bNominal": 2,
+      "b": 2,
+      "y": 37.6
+    },
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b5",
+      "bNominal": 5,
+      "b": 5,
+      "y": 26.3
+    },
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b10",
+      "bNominal": 10,
+      "b": 10,
+      "y": 21.7
+    },
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b20",
+      "bNominal": 20,
+      "b": 20,
+      "y": 20.2
+    },
+    {
+      "group": "requestAccess",
+      "label": "requestAccess@b50",
+      "bNominal": 50,
+      "b": 50,
+      "y": 18.7
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b1",
+      "bNominal": 1,
+      "b": 1,
+      "y": 57.2
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b2",
+      "bNominal": 2,
+      "b": 2,
+      "y": 38.4
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b5",
+      "bNominal": 5,
+      "b": 5,
+      "y": 25.6
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b10",
+      "bNominal": 10,
+      "b": 10,
+      "y": 22.3
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b20",
+      "bNominal": 20,
+      "b": 20,
+      "y": 19.8
+    },
+    {
+      "group": "writeAuditEntry",
+      "label": "writeAuditEntry@b50",
+      "bNominal": 50,
+      "b": 50,
+      "y": 18.9
+    }
+  ]
+}

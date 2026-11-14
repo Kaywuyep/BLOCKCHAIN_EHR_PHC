@@ -113,7 +113,7 @@ export const TABS_FOR_ROLE = {
   patient: ['/patient'],
   clinician: ['/clinician'],
   hospital_admin: ['/admin'],
-  system_admin: ['/admin'],
+  system_admin: ['/patient', '/clinician', '/admin'],
   hl7_interface: [],
 };
 

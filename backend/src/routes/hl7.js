@@ -14,7 +14,7 @@ const { ROLES, actsForHospital, hasRole, isSystemAdmin, deny } = require('../aut
 //
 // Callers must be the hospital's interface engine (role hl7_interface,
 // typically an OIDC client-credentials token) or one of its admins.
-function hl7Router(fhirAdapter, inbox = null) {
+function hl7Router(fhirAdapter, inbox = null, registry = null) {
   const router = express.Router();
 
   // Body must arrive as the raw HL7 v2 message text, not JSON -- send it
@@ -25,6 +25,15 @@ function hl7Router(fhirAdapter, inbox = null) {
     const { hospitalID } = req.params;
     if (!actsForHospital(req.user, hospitalID, ROLES.HL7_INTERFACE, ROLES.HOSPITAL_ADMIN)) {
       return deny(res, 'only this hospital\'s interface engine or admins can submit its HL7 messages');
+    }
+    if (registry) {
+      // Hospitals set up in the admin UI can turn HTTP delivery off or be
+      // deactivated; hospitals not in the registry are left as before.
+      const h = registry.get(hospitalID);
+      if (h && h.status !== 'active') return res.status(403).json({ ok: false, reason: 'this hospital is inactive' });
+      if (h && (!h.hl7 || !h.hl7.httpEnabled)) {
+        return res.status(403).json({ ok: false, reason: 'HL7 over HTTP is not enabled for this hospital' });
+      }
     }
     if (typeof req.body !== 'string' || !req.body.trim()) {
       return res.status(400).json({ ok: false, reason: 'request body must be the raw HL7 v2 message text' });

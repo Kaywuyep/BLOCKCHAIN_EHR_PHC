@@ -45,6 +45,9 @@ class FhirAdapter {
       upsertLink: q(`INSERT INTO did_links (hospital_id, patient_did, hospital_number, linked_at) VALUES (?, ?, ?, ?)
                      ON CONFLICT (hospital_id, patient_did) DO UPDATE SET hospital_number = excluded.hospital_number, linked_at = excluded.linked_at`),
       getLink: q('SELECT hospital_number FROM did_links WHERE hospital_id = ? AND patient_did = ?'),
+      linksForPatient: q('SELECT hospital_id, hospital_number, linked_at FROM did_links WHERE patient_did = ? ORDER BY linked_at'),
+      linksForHospital: q('SELECT patient_did, hospital_number, linked_at FROM did_links WHERE hospital_id = ? ORDER BY linked_at DESC'),
+      getDidByHospitalNumber: q('SELECT patient_did FROM did_links WHERE hospital_id = ? AND hospital_number = ?'),
       insertBundle: q('INSERT INTO clinical_bundles (id, hospital_id, hospital_number, bundle_enc, created_at) VALUES (?, ?, ?, ?, ?)'),
       listBundles: q(`SELECT bundle_enc FROM clinical_bundles WHERE hospital_id = ? AND hospital_number = ?
                       ORDER BY created_at, rowid`),
@@ -82,6 +85,22 @@ class FhirAdapter {
     }));
   }
 
+  /** The hospitals a DID is linked at (the patient's "My Hospitals"). */
+  listLinksForPatient(patientDID) {
+    return this.sql.linksForPatient.all(patientDID).map((r) => ({ hospitalID: r.hospital_id, hospitalNumber: r.hospital_number, linkedAt: r.linked_at }));
+  }
+
+  /** Every DID linked at a hospital, with its hospital number (hospital admin view). */
+  listLinks(hospitalID) {
+    return this.sql.linksForHospital.all(hospitalID).map((r) => ({ patientDID: r.patient_did, hospitalNumber: r.hospital_number, linkedAt: r.linked_at }));
+  }
+
+  /** Reverse lookup: given a hospital number, find the patient DID. */
+  findDidByHospitalNumber(hospitalID, hospitalNumber) {
+    const row = this.sql.getDidByHospitalNumber.get(hospitalID, hospitalNumber);
+    return row ? row.patient_did : null;
+  }
+
   /** Links a DID to a hospital number (or a freshly minted MRN). */
   registerLocalPatient(hospitalID, patientDID, mrn) {
     const hospitalNumber = mrn || `MRN-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -93,16 +112,30 @@ class FhirAdapter {
    *  to a hospital's database, keyed directly by hospital number. Shared by
    *  createClinicalRecord (below, which resolves a DID to a number first)
    *  and recordResourceByHospitalNumber (which doesn't need a DID at all). */
-  _storeBundleEntry(hospitalID, hospitalNumber, resource) {
+  _storeBundleEntry(hospitalID, hospitalNumber, resource, related = []) {
     const bundle = {
       resourceType: 'Bundle',
       type: 'collection',
       id: randomUUID(),
       timestamp: new Date().toISOString(),
-      entry: [{ resource }],
+      entry: [{ resource }, ...related.map((r) => ({ resource: r }))],
     };
     this.sql.insertBundle.run(bundle.id, hospitalID, hospitalNumber, this.cipher.encryptJson(bundle), bundle.timestamp);
+    // Point-of-care hook (FR3): the Reference Service registers an on-chain
+    // pointer for this record if the patient has linked a DID here.
+    if (this.onRecordStored) {
+      try {
+        this.onRecordStored(hospitalID, hospitalNumber, bundle);
+      } catch {
+        // the record is stored; pointer registration retries at link time
+      }
+    }
     return bundle;
+  }
+
+  /** All stored bundles for one hospital number (Reference Service use). */
+  listBundlesByHospitalNumber(hospitalID, hospitalNumber) {
+    return this.sql.listBundles.all(hospitalID, hospitalNumber).map((row) => this.cipher.decryptJson(row.bundle_enc));
   }
 
   /** Hospital creates a clinical record locally (Figure 3, step 1). */
@@ -125,8 +158,8 @@ class FhirAdapter {
    * PatientChain DID to that hospital number. If/when a DID later links to
    * this hospitalNumber, resolveRecord finds these entries automatically.
    */
-  recordResourceByHospitalNumber(hospitalID, hospitalNumber, resource) {
-    return this._storeBundleEntry(hospitalID, hospitalNumber, resource);
+  recordResourceByHospitalNumber(hospitalID, hospitalNumber, resource, related = []) {
+    return this._storeBundleEntry(hospitalID, hospitalNumber, resource, related);
   }
 
   /**
