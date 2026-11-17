@@ -688,12 +688,12 @@
 
 .grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
 }
 
 @media (max-width: 860px) {
-  .grid-2 { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 
 .field {
@@ -930,10 +930,198 @@
 
 
 /* ── Responsive ──────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .sidebar { display: none; }
-  .app-main { margin-left: 0 !important; }
-  .main-content { padding: 16px; }
+/* Wide content (tables, code) scrolls inside its own box instead of
+   pushing the whole page wider than the screen. */
+.app-main { min-width: 0; }
+.main-content { min-width: 0; }
+.table-wrap { max-width: 100%; -webkit-overflow-scrolling: touch; }
+img, video, canvas, svg { max-width: 100%; }
+
+/* Menu button: only on phones and tablets. */
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 40px;
+  height: 40px;
+  margin-left: -8px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+.nav-toggle span {
+  display: block;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.nav-toggle:hover { background: var(--parchment); }
+.top-bar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.top-bar-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.5);
+  animation: nav-fade 0.2s ease;
+}
+@keyframes nav-fade { from { opacity: 0; } to { opacity: 1; } }
+body.nav-locked { overflow: hidden; }
+
+.bottom-nav { display: none; }
+
+/* Tablets and phones: the sidebar slides in over the page. */
+@media (max-width: 1024px) {
+  .nav-toggle { display: inline-flex; }
+  .sidebar,
+  .sidebar.sidebar-closed {
+    width: min(300px, 84vw);
+    z-index: 70;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+  }
+  .sidebar.drawer-open {
+    transform: translateX(0);
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.35);
+  }
+  .sidebar-toggle { display: none; }
+  .sidebar-nav-item, .sidebar-section-btn { padding-top: 11px; padding-bottom: 11px; font-size: 14px; }
+  .app-main,
+  .sidebar-closed ~ .app-main { margin-left: 0; }
+  .top-bar { padding: 0 20px; }
+  .main-content { padding: 20px; max-width: none; }
+}
+
+/* Phones */
+@media (max-width: 640px) {
+  :root { --header-height: 56px; }
+  .top-bar { padding: 0 12px; gap: 8px; }
+  .top-bar-title { font-size: 16px; }
+  .top-bar-right { gap: 6px; }
+  .top-status-ledger { display: none; }
+  .top-status { padding: 5px 9px; }
+  .main-content { padding: 12px; }
+
+  .panel { padding: 16px; margin-bottom: 14px; border-radius: 14px; }
+  .dash-welcome { padding: 20px; margin-bottom: 16px; }
+  .dash-welcome h2 { font-size: 19px; }
+  .dash-welcome p { font-size: 13.5px; }
+  .dash-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat-row { gap: 10px; }
+  .stat { flex: 1 1 calc(50% - 10px); min-width: 0; }
+  .data-row { flex-wrap: wrap; gap: 4px 12px; }
+  .data-row .v { word-break: break-all; }
+
+  /* Touch-friendly controls; 16px inputs stop iOS zooming on focus. */
+  .btn { min-height: 40px; }
+  .field input, .field select, .field textarea,
+  .login-field input, .login-field select { font-size: 16px; }
+
+  /* Tab bar for the patient and clinician portals. */
+  .has-bottom-nav .main-content { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, 0.97);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+    backdrop-filter: blur(8px);
+  }
+  .bottom-nav-item {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 2px;
+    border-radius: 10px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .bottom-nav-item.active { color: var(--brand-blue); background: rgba(37, 99, 235, 0.08); font-weight: 600; }
+  .bottom-nav-icon { font-size: 20px; line-height: 1; }
+  .bottom-nav-label { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bottom-nav-badge {
+    position: absolute;
+    top: 2px;
+    left: calc(50% + 6px);
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #ef4444;
+    color: white;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+  }
+
+  /* Tables become one card per row, each value with its column name
+     (labels are filled in by useTableLabels). */
+  .table-wrap { overflow-x: visible; }
+  .admin-table, .admin-table tbody, .admin-table tr, .admin-table td { display: block; width: 100%; }
+  .admin-table thead { display: none; }
+  .admin-table tr {
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: white;
+  }
+  .admin-table tr:last-child { margin-bottom: 0; }
+  .admin-table tbody td {
+    position: relative;
+    min-height: 30px;
+    padding: 6px 0 6px calc(34% + 10px);
+    border-bottom: none;
+    overflow-wrap: anywhere;
+    text-align: left;
+    white-space: normal;
+  }
+  .admin-table tbody tr td:not(:last-child) { border-bottom: 1px dashed var(--line); }
+  .admin-table td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 34%;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.3;
+    color: var(--ink-soft);
+  }
+  .admin-table td[data-label=""],
+  .admin-table td[colspan] { padding-left: 0; }
+  .admin-table td[data-label=""]::before,
+  .admin-table td[colspan]::before { display: none; }
+  .admin-table td.cell-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 2px; }
+  .admin-table td.cell-actions::before { display: none; }
+  .admin-table td.cell-actions .btn + .btn { margin-left: 0; }
+
+  .modal-panel { padding: 20px; }
+  .login-right { padding: 28px 18px; }
+
+  /* Patient: My Hospitals rows put their status and Unlink on a line of their own. */
+  .facility-row { flex-wrap: wrap; }
+  .facility-row > div:nth-child(2) { flex-basis: calc(100% - 58px) !important; }
+  .facility-actions { width: 100%; justify-content: flex-end; }
 }
 
 /* Password accounts (AUTH_MODE=password) */

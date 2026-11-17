@@ -10,21 +10,22 @@ import { ChangePassword } from './pages/ChangePassword';
 import { Watermark } from './components/Watermark';
 import { api } from './api';
 import { useLedgerEvents } from './ledgerEvents';
+import { useMediaQuery, useTableLabels } from './responsive';
 import { SessionContext, allowedTabs, completeOidcRedirect, fetchAuthConfig, fetchSession, logout } from './auth';
 
 const NAV_ITEMS = {
   '/patient': [
-    { path: '/patient', label: 'My Health ID', icon: 'fingerprint' },
-    { path: '/patient/facilities', label: 'My Hospitals', icon: 'local_hospital' },
-    { path: '/patient/records', label: 'My Records', icon: 'description' },
-    { path: '/patient/access', label: 'Access Control', icon: 'shield' },
-    { path: '/patient/audit', label: 'Audit Trail', icon: 'history' },
+    { path: '/patient', label: 'My Health ID', short: 'Health ID', icon: 'fingerprint' },
+    { path: '/patient/facilities', label: 'My Hospitals', short: 'Hospitals', icon: 'local_hospital' },
+    { path: '/patient/records', label: 'My Records', short: 'Records', icon: 'description' },
+    { path: '/patient/access', label: 'Access Control', short: 'Access', icon: 'shield' },
+    { path: '/patient/audit', label: 'Audit Trail', short: 'Audit', icon: 'history' },
   ],
   '/clinician': [
-    { path: '/clinician', label: 'Overview', icon: 'dashboard' },
-    { path: '/clinician/request', label: 'Request Access', icon: 'key' },
-    { path: '/clinician/emergency', label: 'Emergency Access', icon: 'warning' },
-    { path: '/clinician/records', label: 'View Records', icon: 'folder_open' },
+    { path: '/clinician', label: 'Overview', short: 'Overview', icon: 'dashboard' },
+    { path: '/clinician/request', label: 'Request Access', short: 'Request', icon: 'key' },
+    { path: '/clinician/emergency', label: 'Emergency Access', short: 'Emergency', icon: 'warning' },
+    { path: '/clinician/records', label: 'View Records', short: 'Records', icon: 'folder_open' },
   ],
   '/admin': [
     { path: '/admin', label: 'Overview', icon: 'dashboard' },
@@ -72,6 +73,25 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [changingPassword, setChangingPassword] = useState(false);
   const location = useLocation();
+  // Phones and tablets: the sidebar becomes a slide-out menu (navOpen).
+  const compact = useMediaQuery('(max-width: 1024px)');
+  const [navOpen, setNavOpen] = useState(false);
+  const expanded = compact || sidebarOpen;
+  const [mainEl, setMainEl] = useState(null);
+  useTableLabels(mainEl);
+
+  // Close the menu on navigation, on Escape, and when leaving compact mode.
+  useEffect(() => { setNavOpen(false); }, [location.pathname, compact]);
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setNavOpen(false); };
+    window.addEventListener('keydown', onKey);
+    document.body.classList.add('nav-locked');
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.classList.remove('nav-locked');
+    };
+  }, [navOpen]);
 
   const refresh = useCallback(async () => {
     setSession(await fetchSession());
@@ -152,13 +172,18 @@ export default function App() {
   return (
     <SessionContext.Provider value={sessionValue}>
       <Watermark session={authOn ? session : null} demo={!authOn} />
-      <div className="app-layout">
-        {/* Sidebar */}
-        <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
+      <div className={`app-layout ${bottomNav(currentSection) ? 'has-bottom-nav' : ''}`}>
+        {compact && navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+        {/* Sidebar (a slide-out menu on phones and tablets) */}
+        <aside
+          id="app-nav"
+          className={`sidebar ${expanded ? 'sidebar-open' : 'sidebar-closed'} ${navOpen ? 'drawer-open' : ''}`}
+          aria-label="Main menu"
+        >
           <div className="sidebar-brand">
             <Link to="/" className="sidebar-logo-link">
               <img src="/Gradient C Medical App Icon.png" alt="Cevruni" className="sidebar-icon" />
-              {sidebarOpen && <span className="sidebar-brand-name">Cevruni</span>}
+              {expanded && <span className="sidebar-brand-name">Cevruni</span>}
             </Link>
           </div>
 
@@ -175,14 +200,14 @@ export default function App() {
                 <span className="sidebar-section-icon">
                   {t === '/patient' ? '\u{1F464}' : t === '/clinician' ? '\u{1FA7A}' : '\u{1F3E5}'}
                 </span>
-                {sidebarOpen && <span>{SECTION_LABELS[t]}</span>}
+                {expanded && <span>{SECTION_LABELS[t]}</span>}
               </NavLink>
             ))}
           </div>
 
           {/* Section nav items */}
           <nav className="sidebar-nav">
-            {sidebarOpen && <span className="sidebar-nav-label">{SECTION_LABELS[currentSection]}</span>}
+            {expanded && <span className="sidebar-nav-label">{SECTION_LABELS[currentSection]}</span>}
             {sidebarItems.map(item => {
               const badge = item.path === '/patient/access' && pendingCount > 0 ? pendingCount : 0;
               return (
@@ -193,7 +218,7 @@ export default function App() {
                   className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
                 >
                   <span className="sidebar-nav-icon">{navIcon(item.icon)}</span>
-                  {sidebarOpen && <span>{item.label}</span>}
+                  {expanded && <span>{item.label}</span>}
                   {badge > 0 && <span className="sidebar-badge">{badge}</span>}
                 </NavLink>
               );
@@ -206,18 +231,18 @@ export default function App() {
               <div className="sidebar-user-avatar">
                 {(session.displayName || session.login || session.sub || 'U')[0].toUpperCase()}
               </div>
-              {sidebarOpen && (
+              {expanded && (
                 <div className="sidebar-user-info">
                   <span className="sidebar-user-name" title={session.login || session.sub}>{session.displayName || session.login || session.sub}</span>
                   <span className="sidebar-user-role">{roleLabel(session.roles)}</span>
                 </div>
               )}
-              {sidebarOpen && authConfig?.mode === 'password' && (
+              {expanded && authConfig?.mode === 'password' && (
                 <button className="sidebar-signout" onClick={() => setChangingPassword(true)} title="Change password" aria-label="Change password">
                   &#x1F511;
                 </button>
               )}
-              {sidebarOpen && (
+              {expanded && (
                 <button className="sidebar-signout" onClick={sessionValue.logout} title="Sign out">
                   &#x2192;
                 </button>
@@ -234,6 +259,15 @@ export default function App() {
         <div className="app-main">
           <header className="top-bar">
             <div className="top-bar-left">
+              <button
+                className="nav-toggle"
+                onClick={() => setNavOpen(o => !o)}
+                aria-label={navOpen ? 'Close menu' : 'Open menu'}
+                aria-expanded={navOpen}
+                aria-controls="app-nav"
+              >
+                <span /><span /><span />
+              </button>
               <h1 className="top-bar-title">{SECTION_LABELS[currentSection] || 'Cevruni'}</h1>
             </div>
             <div className="top-bar-right">
@@ -241,9 +275,9 @@ export default function App() {
                 <>
                   <span className={`top-status ${health.connectivity === 'online' ? 'online' : 'offline'}`}>
                     <span className="top-status-dot" />
-                    {health.connectivity}
+                    <span className="top-status-text">{health.connectivity}</span>
                   </span>
-                  <span className="top-status">
+                  <span className="top-status top-status-ledger">
                     Ledger: <strong>{health.ledgerMode}</strong>
                   </span>
                 </>
@@ -252,7 +286,7 @@ export default function App() {
             </div>
           </header>
 
-          <main className="main-content">
+          <main className="main-content" ref={setMainEl}>
             {authError && <div className="error-banner">{authError}</div>}
             <Routes>
               <Route path="/" element={<Navigate to={authOn ? defaultHome : '/patient'} replace />} />
@@ -263,12 +297,38 @@ export default function App() {
             </Routes>
           </main>
         </div>
+
+        {/* Phones: tab bar for the patient and clinician portals */}
+        {bottomNav(currentSection) && (
+          <nav className="bottom-nav" aria-label={SECTION_LABELS[currentSection]}>
+            {sidebarItems.map(item => {
+              const badge = item.path === '/patient/access' && pendingCount > 0 ? pendingCount : 0;
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === currentSection}
+                  className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}
+                >
+                  <span className="bottom-nav-icon">{navIcon(item.icon)}</span>
+                  <span className="bottom-nav-label">{item.short || item.label}</span>
+                  {badge > 0 && <span className="bottom-nav-badge">{badge}</span>}
+                </NavLink>
+              );
+            })}
+          </nav>
+        )}
       </div>
       {changingPassword && (
         <ChangePassword session={session} onDone={refresh} onCancel={() => setChangingPassword(false)} />
       )}
     </SessionContext.Provider>
   );
+}
+
+/** Sections short enough for a phone tab bar (the admin menu is too long). */
+function bottomNav(section) {
+  return section === '/patient' || section === '/clinician';
 }
 
 function navIcon(name) {

@@ -524,18 +524,19 @@ export function PatientApp() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {linkedFacilities.map((f) => (
-                      <div key={f.hospitalID} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--parchment)', borderRadius: 'var(--radius)', border: '1px solid var(--line)' }}>
+                      <div key={f.hospitalID} className="facility-row" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', background: 'var(--parchment)', borderRadius: 'var(--radius)', border: '1px solid var(--line)' }}>
                         <div style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(37,99,235,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>{'\u{1F3E5}'}</div>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14 }}>{f.name || hospitalName(f.hospitalID)}</div>
                           {f.location && <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{f.location}</div>}
                           <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Hospital No: <strong>{f.hospitalNumber}</strong></div>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div className="facility-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--sage)', background: 'var(--sage-bg)', padding: '4px 10px', borderRadius: 20 }}>Linked</span>
                           <button
                             className="btn btn-ghost"
                             style={{ fontSize: 12, padding: '4px 12px', color: 'var(--rust)' }}
+                            disabled={loading}
                             onClick={() => handleUnlink(f.hospitalID)}
                           >
                             Unlink

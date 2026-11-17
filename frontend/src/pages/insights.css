@@ -79,7 +79,7 @@
 .dx-done { color: #047857; font-size: 13px; font-weight: 600; }
 
 @media (max-width: 640px) {
-  .ins-hbars li { grid-template-columns: 1fr 40px; }
+  .ins-hbars li { grid-template-columns: minmax(0, 1fr) 40px; }
   .ins-hbar-track { grid-column: 1 / -1; grid-row: 2; }
-  .ins-map-form { grid-template-columns: 1fr; }
+  .ins-map-form { grid-template-columns: minmax(0, 1fr); }
 }
