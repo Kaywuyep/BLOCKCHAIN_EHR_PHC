@@ -13,7 +13,7 @@ const { validateResource } = require('../services/fhirValidation');
  *
  *   POST /api/ingest/:hospitalID
  *   { "hospitalNumber": "536728",
- *     "patient":  { "name": "Amina Yusuf", "dob": "1995-03-15" },   (optional)
+ *     "patient":  { "name": "Amina Yusuf", "dob": "1995-03-15" },   (optional; dob optional)
  *     "resources": [ <FHIR R4 resources>... ] }
  *
  * or a FHIR Bundle (collection / transaction / batch) whose Patient entry
@@ -35,12 +35,13 @@ function hospitalNumberFrom(body) {
 }
 
 function demographicsFrom(body) {
-  if (body.patient && body.patient.name && body.patient.dob) return { name: String(body.patient.name), dob: String(body.patient.dob) };
+  // Name is required for patients to link the record; date of birth is optional.
+  if (body.patient && body.patient.name) return { name: String(body.patient.name), dob: body.patient.dob ? String(body.patient.dob) : null };
   const patient = (body.resources || (body.entry || []).map((e) => e.resource)).find((r) => r && r.resourceType === 'Patient');
-  if (!patient || !patient.birthDate) return null;
+  if (!patient) return null;
   const n = (patient.name || [])[0] || {};
   const name = n.text || [...(n.given || []), n.family].filter(Boolean).join(' ');
-  return name ? { name, dob: patient.birthDate } : null;
+  return name ? { name, dob: patient.birthDate || null } : null;
 }
 
 function ingestRouter(fhirAdapter, hospitalRegistry = null) {

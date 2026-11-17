@@ -6,6 +6,7 @@ import { PatientApp } from './pages/PatientApp';
 import { ClinicianPortal } from './pages/ClinicianPortal';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { Login } from './pages/Login';
+import { ChangePassword } from './pages/ChangePassword';
 import { Watermark } from './components/Watermark';
 import { api } from './api';
 import { useLedgerEvents } from './ledgerEvents';
@@ -20,7 +21,8 @@ const NAV_ITEMS = {
     { path: '/patient/audit', label: 'Audit Trail', icon: 'history' },
   ],
   '/clinician': [
-    { path: '/clinician', label: 'Request Access', icon: 'key' },
+    { path: '/clinician', label: 'Overview', icon: 'dashboard' },
+    { path: '/clinician/request', label: 'Request Access', icon: 'key' },
     { path: '/clinician/emergency', label: 'Emergency Access', icon: 'warning' },
     { path: '/clinician/records', label: 'View Records', icon: 'folder_open' },
   ],
@@ -68,6 +70,7 @@ export default function App() {
   const [authError, setAuthError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [changingPassword, setChangingPassword] = useState(false);
   const location = useLocation();
 
   const refresh = useCallback(async () => {
@@ -141,6 +144,11 @@ export default function App() {
     );
   }
 
+  // Signed in with a temporary password: nothing else until it is changed.
+  if (authOn && session?.mustChangePassword) {
+    return <ChangePassword forced session={session} onDone={refresh} onSignOut={sessionValue.logout} />;
+  }
+
   return (
     <SessionContext.Provider value={sessionValue}>
       <Watermark session={authOn ? session : null} demo={!authOn} />
@@ -196,13 +204,18 @@ export default function App() {
           {authOn && session && (
             <div className="sidebar-user">
               <div className="sidebar-user-avatar">
-                {(session.sub || 'U')[0].toUpperCase()}
+                {(session.displayName || session.login || session.sub || 'U')[0].toUpperCase()}
               </div>
               {sidebarOpen && (
                 <div className="sidebar-user-info">
-                  <span className="sidebar-user-name">{session.sub}</span>
+                  <span className="sidebar-user-name" title={session.login || session.sub}>{session.displayName || session.login || session.sub}</span>
                   <span className="sidebar-user-role">{roleLabel(session.roles)}</span>
                 </div>
+              )}
+              {sidebarOpen && authConfig?.mode === 'password' && (
+                <button className="sidebar-signout" onClick={() => setChangingPassword(true)} title="Change password" aria-label="Change password">
+                  &#x1F511;
+                </button>
               )}
               {sidebarOpen && (
                 <button className="sidebar-signout" onClick={sessionValue.logout} title="Sign out">
@@ -251,6 +264,9 @@ export default function App() {
           </main>
         </div>
       </div>
+      {changingPassword && (
+        <ChangePassword session={session} onDone={refresh} onCancel={() => setChangingPassword(false)} />
+      )}
     </SessionContext.Provider>
   );
 }

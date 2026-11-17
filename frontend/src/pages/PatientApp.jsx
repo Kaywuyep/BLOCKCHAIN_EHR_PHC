@@ -22,6 +22,8 @@ export function PatientApp() {
   const [firstHospitalID, setFirstHospitalID] = useState('');
   const [firstNumber, setFirstNumber] = useState('');
   const [firstDob, setFirstDob] = useState('');
+  // Name as registered at the hospital (required); starts as the account name.
+  const [firstName, setFirstName] = useState(session?.displayName || '');
   const [firstMatch, setFirstMatch] = useState(null);
   useScreenCaptureSubject(patientDID);
   const [patient, setPatient] = useState(null);
@@ -37,6 +39,7 @@ export function PatientApp() {
   const [selectedHospital, setSelectedHospital] = useState(null);
   const [facilityNumber, setFacilityNumber] = useState('');
   const [facilityDob, setFacilityDob] = useState('');
+  const [facilityName, setFacilityName] = useState(session?.displayName || '');
   const [facilityMatch, setFacilityMatch] = useState(null);
   const [facilityError, setFacilityError] = useState(null);
   const [linkedFacilities, setLinkedFacilities] = useState([]);
@@ -96,7 +99,7 @@ export function PatientApp() {
     setError(null);
     setFirstMatch(null);
     try {
-      setFirstMatch(await api.registerLookup({ hospitalID: firstHospitalID, hospitalNumber: firstNumber.trim(), dateOfBirth: firstDob }));
+      setFirstMatch(await api.registerLookup({ hospitalID: firstHospitalID, hospitalNumber: firstNumber.trim(), name: firstName.trim(), dateOfBirth: firstDob || undefined }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -152,14 +155,15 @@ export function PatientApp() {
   }
 
   async function handleLinkHospital() {
-    if (!selectedHospital || !facilityNumber || !facilityDob) return;
+    if (!selectedHospital || !facilityNumber.trim() || !facilityName.trim()) return;
     setLoading(true);
     setFacilityError(null);
     try {
       const result = await api.linkFacility(patientDID, {
         hospitalID: selectedHospital.hospitalID,
         hospitalNumber: facilityNumber.trim(),
-        dateOfBirth: facilityDob,
+        name: facilityName.trim(),
+        dateOfBirth: facilityDob || undefined,
       });
       setFacilityMatch(result);
     } catch (e) {
@@ -361,7 +365,7 @@ export function PatientApp() {
           {error && <div className="error-banner">{error}</div>}
 
           <div className="dash-welcome">
-            <h2>Welcome{session?.sub ? `, ${session.sub}` : ''}</h2>
+            <h2>Welcome{session?.displayName ? `, ${session.displayName.split(" ")[0]}` : session?.sub ? `, ${session.sub}` : ''}</h2>
             <p>Manage your health identity, link hospitals, and control who accesses your records.</p>
           </div>
 
@@ -412,7 +416,7 @@ export function PatientApp() {
               <p style={{ fontSize: 14, color: 'var(--ink-soft)', marginBottom: 16, lineHeight: 1.6 }}>
                 Your Health ID is a unique, portable identity that works across all hospitals.
                 First, confirm your record at the hospital where you registered first, using the hospital number on
-                your card and your date of birth. A private signing key is then created on this device: you use it to
+                your card and your name as the hospital registered it (date of birth is optional). A private signing key is then created on this device: you use it to
                 approve or revoke access, and it never leaves the device.
               </p>
               {session && (
@@ -430,12 +434,16 @@ export function PatientApp() {
                       <input value={firstNumber} onChange={(e) => { setFirstNumber(e.target.value); setFirstMatch(null); }} placeholder="on your hospital card" />
                     </div>
                     <div className="field">
-                      <label>Date of birth</label>
+                      <label>Name at the hospital</label>
+                      <input value={firstName} onChange={(e) => { setFirstName(e.target.value); setFirstMatch(null); }} placeholder="first name and surname" />
+                    </div>
+                    <div className="field">
+                      <label>Date of birth <span className="optional">optional</span></label>
                       <input type="date" value={firstDob} onChange={(e) => { setFirstDob(e.target.value); setFirstMatch(null); }} />
                     </div>
                   </div>
                   {!firstMatch && (
-                    <button className="btn btn-primary" onClick={handleFirstLookup} disabled={loading || !firstHospitalID || !firstNumber || !firstDob}>
+                    <button className="btn btn-primary" onClick={handleFirstLookup} disabled={loading || !firstHospitalID || !firstNumber.trim() || !firstName.trim()}>
                       {loading ? 'Checking…' : 'Find my record'}
                     </button>
                   )}
@@ -581,11 +589,15 @@ export function PatientApp() {
                           <input value={facilityNumber} onChange={(e) => setFacilityNumber(e.target.value)} placeholder="e.g. 536728" style={{ fontSize: 15, padding: '12px 14px' }} />
                         </div>
                         <div className="field">
-                          <label>Date of birth (for verification)</label>
+                          <label>Your name at this hospital</label>
+                          <input value={facilityName} onChange={(e) => setFacilityName(e.target.value)} placeholder="first name and surname" style={{ fontSize: 15, padding: '12px 14px' }} />
+                        </div>
+                        <div className="field">
+                          <label>Date of birth <span className="optional">optional</span></label>
                           <input type="date" value={facilityDob} onChange={(e) => setFacilityDob(e.target.value)} style={{ fontSize: 15, padding: '12px 14px' }} />
                         </div>
                       </div>
-                      <button className="btn btn-primary" onClick={handleLinkHospital} disabled={loading || !facilityNumber.trim() || !facilityDob} style={{ marginTop: 4, fontSize: 14, padding: '11px 24px' }}>
+                      <button className="btn btn-primary" onClick={handleLinkHospital} disabled={loading || !facilityNumber.trim() || !facilityName.trim()} style={{ marginTop: 4, fontSize: 14, padding: '11px 24px' }}>
                         {loading ? 'Verifying...' : 'Verify & Add to Network'}
                       </button>
                     </>

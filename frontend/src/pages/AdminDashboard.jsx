@@ -181,16 +181,16 @@ export function AdminDashboard() {
               <div className="field"><label>Hospital ID</label><input value={rosterHospitalID} onChange={(e) => setRosterHospitalID(e.target.value)} placeholder="e.g. hospital-a" /></div>
               <div className="field"><label>Hospital number</label><input value={rosterForm.hospitalNumber} onChange={(e) => setRosterForm((f) => ({ ...f, hospitalNumber: e.target.value }))} /></div>
               <div className="field"><label>Full name</label><input value={rosterForm.name} onChange={(e) => setRosterForm((f) => ({ ...f, name: e.target.value }))} /></div>
-              <div className="field"><label>Date of birth</label><input type="date" value={rosterForm.dob} onChange={(e) => setRosterForm((f) => ({ ...f, dob: e.target.value }))} /></div>
+              <div className="field"><label>Date of birth <span className="optional">optional</span></label><input type="date" value={rosterForm.dob} onChange={(e) => setRosterForm((f) => ({ ...f, dob: e.target.value }))} /></div>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-primary" onClick={handleAddRosterRecord} disabled={loading || !rosterHospitalID || !rosterForm.hospitalNumber || !rosterForm.name || !rosterForm.dob}>Add record</button>
+              <button className="btn btn-primary" onClick={handleAddRosterRecord} disabled={loading || !rosterHospitalID || !rosterForm.hospitalNumber.trim() || !rosterForm.name.trim()}>Add record</button>
               <button className="btn btn-ghost" onClick={() => loadRoster(rosterHospitalID)} disabled={!rosterHospitalID}>View roster</button>
             </div>
             {roster.length === 0 && <p className="hint" style={{ marginTop: 14 }}>{rosterHospitalID ? `No local records at ${rosterHospitalID} yet.` : 'Enter a hospital ID above.'}</p>}
             {roster.length > 0 && (
               <div style={{ marginTop: 14 }}>
-                {roster.map((r) => <div className="data-row" key={r.hospitalNumber}><span className="k">{r.name} — {r.hospitalNumber}</span><span className="v">DOB {r.dob}</span></div>)}
+                {roster.map((r) => <div className="data-row" key={r.hospitalNumber}><span className="k">{r.name} — {r.hospitalNumber}</span><span className="v">{r.dob ? `DOB ${r.dob}` : 'no DOB'}</span></div>)}
               </div>
             )}
           </div>

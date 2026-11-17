@@ -42,10 +42,10 @@ async function world() {
   // at their first hospital (hospital number + date of birth).
   server.fhirAdapter.addLocalPatientRecord(H_A, 'A-100', { name: 'Amina Yusuf', dob: '1995-03-15' });
   server.fhirAdapter.addLocalPatientRecord(H_B, 'B-200', { name: 'Bola Ade', dob: '1990-01-01' });
-  await patient.post('/patients/register/lookup', { hospitalID: H_A, hospitalNumber: 'A-100', dateOfBirth: '1995-03-15' });
+  await patient.post('/patients/register/lookup', { hospitalID: H_A, hospitalNumber: 'A-100', name: 'Amina Yusuf', dateOfBirth: '1995-03-15' });
   const registered = await patient.post('/patients/register', { firstFacility: { hospitalID: H_A, hospitalNumber: 'A-100' } });
   const did = registered.body.patient.patientDID;
-  await otherPatient.post('/patients/register/lookup', { hospitalID: H_B, hospitalNumber: 'B-200', dateOfBirth: '1990-01-01' });
+  await otherPatient.post('/patients/register/lookup', { hospitalID: H_B, hospitalNumber: 'B-200', name: 'Bola Ade', dateOfBirth: '1990-01-01' });
   await otherPatient.post('/patients/register', { firstFacility: { hospitalID: H_B, hospitalNumber: 'B-200' } });
   // Amina also has Hospital B in her network; Dr A (Hospital A) asks for
   // her Hospital B records. Hospital C is an outsider.

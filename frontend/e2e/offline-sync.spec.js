@@ -28,7 +28,7 @@ test('offline sync: a queued request survives a disconnect and replays on reconn
   await patientWithNetwork(patientSubject, dob, [
     { hospitalID: H.langtang.id, hospitalNumber: lagNumber },
     { hospitalID: H.wase.id, hospitalNumber: wasNumber },
-  ]);
+  ], name);
 
   const adminPage = await (await browser.newContext()).newPage();
   const clinicianPage = await (await browser.newContext()).newPage();
@@ -47,6 +47,7 @@ test('offline sync: a queued request survives a disconnect and replays on reconn
 
     await test.step('a request made while offline is queued locally instead of failing', async () => {
       await signIn(clinicianPage, { role: 'clinician', subject: providerID, hospitalID: H.langtang.id });
+      await gotoNav(clinicianPage, 'Request Access');
       await field(clinicianPage, `Patient’s hospital number at ${H.langtang.name}`).locator('input').fill(lagNumber);
       await clinicianPage.getByRole('button', { name: 'Find patient' }).click();
       await clinicianPage.locator('.cl-hospital').filter({ hasText: H.wase.name }).getByRole('checkbox').check();

@@ -55,6 +55,8 @@ function createApp({
   demoFhir = false,
   cipher = null,
   diagnoses = null,
+  accounts = null,
+  onboarding = null,
   startedAt = Date.now(),
 }) {
   const app = express();
@@ -195,6 +197,65 @@ function createApp({
     });
   });
 
+  // ── Password accounts (AUTH_MODE=password) ─────────────────────────────
+  const passwordMode = auth.mode === 'password' && accounts && userDirectory;
+
+  async function tokenFor(subject, { mustChange = false } = {}) {
+    const user = userDirectory.getAccount(subject);
+    if (!user) throw Object.assign(new Error('account not found'), { status: 401 });
+    if (user.status === 'disabled') throw Object.assign(new Error('this account is disabled'), { status: 403 });
+    const staff = user.roles.some((r) => ['clinician', 'hospital_admin', 'hl7_interface'].includes(r));
+    if (staff && hospitalRegistry) {
+      const h = hospitalRegistry.get(user.hospitalID);
+      if (!h || h.status !== 'active') throw Object.assign(new Error('your hospital is not active on Cevruni'), { status: 403 });
+    }
+    // The hospital's register (from its EMR) decides whether a clinician may work.
+    if (user.roles.includes('clinician') && providerRegistry && !providerRegistry.isAuthorized(user.providerID, user.hospitalID)) {
+      throw Object.assign(new Error("your hospital's staff register shows you as not active; contact your hospital admin"), { status: 403 });
+    }
+    const token = await auth.issueLocalToken({
+      sub: subject,
+      roles: user.roles,
+      hospitalID: user.hospitalID || undefined,
+      providerID: user.roles.includes('clinician') ? user.providerID || undefined : undefined,
+      mustChangePassword: mustChange,
+    });
+    return { token, expiresIn: mustChange ? Math.min(900, config.auth.tokenTtlSeconds) : config.auth.tokenTtlSeconds, mustChangePassword: mustChange };
+  }
+
+  function authError(res, err) {
+    if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
+    if (err.status === 503) return res.status(503).json({ error: err.message });
+    logger.error('auth endpoint failed', { requestId: res.req.id, err });
+    return res.status(500).json({ error: 'internal server error', requestId: res.req.id });
+  }
+
+  if (passwordMode) {
+    // Patients create their own account. Staff accounts are created by admins.
+    app.post('/api/auth/signup', authLimiter, async (req, res) => {
+      try {
+        const { fullName, email, password } = req.body || {};
+        const { subject } = await onboarding.signUpPatient({ fullName, email, password });
+        res.status(201).json(await tokenFor(subject));
+      } catch (err) {
+        authError(res, err);
+      }
+    });
+
+    app.post('/api/auth/login', authLimiter, async (req, res) => {
+      try {
+        const { login, password } = req.body || {};
+        if (typeof login !== 'string' || typeof password !== 'string' || !login.trim() || !password) {
+          return res.status(400).json({ error: 'enter your email or username and your password' });
+        }
+        const result = accounts.authenticate(login, password);
+        res.json(await tokenFor(result.subject, { mustChange: result.mustChange }));
+      } catch (err) {
+        authError(res, err);
+      }
+    });
+  }
+
   app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (auth.mode !== 'local') return res.status(404).json({ error: 'local login is disabled' });
     const { subject, role, hospitalID, providerID } = req.body || {};
@@ -249,13 +310,38 @@ function createApp({
     });
   }
 
-  app.get('/api/auth/me', (req, res) => {
-    const { sub, roles, hospitalID, providerID, patientDID, superuser } = req.user;
-    res.json({ sub, roles, hospitalID, providerID, patientDID, superuser });
+  // A temporary password only lets the user see who they are and change it.
+  app.use('/api', (req, res, next) => {
+    if (!req.user || !req.user.mustChangePassword) return next();
+    if (['/auth/me', '/auth/password'].includes(req.path)) return next();
+    return res.status(403).json({ error: 'change your temporary password first', code: 'PASSWORD_CHANGE_REQUIRED' });
   });
 
+  app.get('/api/auth/me', (req, res) => {
+    const { sub, roles, hospitalID, providerID, patientDID, superuser, mustChangePassword } = req.user;
+    const me = { sub, roles, hospitalID, providerID, patientDID, superuser, mustChangePassword: Boolean(mustChangePassword) };
+    if (passwordMode) {
+      const account = userDirectory.getAccount(sub);
+      me.displayName = account ? account.displayName : null;
+      me.login = accounts.loginFor(sub);
+    }
+    res.json(me);
+  });
+
+  if (passwordMode) {
+    app.post('/api/auth/password', authLimiter, async (req, res) => {
+      try {
+        const { currentPassword, newPassword } = req.body || {};
+        accounts.changePassword(req.user.sub, currentPassword, newPassword);
+        res.json(await tokenFor(req.user.sub));
+      } catch (err) {
+        authError(res, err);
+      }
+    });
+  }
+
   // ── API ────────────────────────────────────────────────────────────────
-  app.use('/api/patients', patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore, referenceService));
+  app.use('/api/patients', patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore, referenceService, { hospitalRegistry, logger }));
   app.use('/api/providers', providersRouter(providerRegistry));
   app.use('/api/access', accessRouter(ledgerPromise, offlineQueue, providerRegistry, fhirAdapter, { db, cipher, hospitalRegistry }));
   app.use('/api/records', recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry));
@@ -266,7 +352,7 @@ function createApp({
   app.use('/api/hospitals', hospitalsRouter(hospitalRegistry));
   app.use('/api/ingest', ingestRouter(fhirAdapter, hospitalRegistry));
   app.use('/api/events', eventsRouter(ledgerPromise));
-  app.use('/api/hospital-admin', hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, db, cipher }));
+  app.use('/api/hospital-admin', hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, db, cipher, onboarding: passwordMode ? onboarding : null, accounts: passwordMode ? accounts : null }));
   // Diagnosis catalogue + anonymous counts (Insights). Keyed hashes use a
   // key derived from the field-encryption key.
   const diagnosisStore = diagnoses || (db ? new DiagnosisInsights({ db, hashKey: cipher ? cipher.keys.get(cipher.activeKid) : null }) : null);
@@ -275,7 +361,7 @@ function createApp({
     app.use('/api/insights', insightsRouter({ diagnoses: diagnosisStore, ledgerPromise, hospitalRegistry }));
   }
   if (hospitalRegistry && userDirectory && listenerManager) {
-    app.use('/api/admin', adminRouter({ registry: hospitalRegistry, users: userDirectory, listenerManager }));
+    app.use('/api/admin', adminRouter({ registry: hospitalRegistry, users: userDirectory, listenerManager, onboarding: passwordMode ? onboarding : null, accounts: passwordMode ? accounts : null }));
   }
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'not found' }));

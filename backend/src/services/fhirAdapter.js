@@ -56,8 +56,8 @@ class FhirAdapter {
 
   /** Adds (or updates) an entry in a hospital's own patient roster, keyed
    *  by the hospital's own number -- simulating a record the hospital's
-   *  legacy EMR already has, before PatientChain existed. `name` and `dob`
-   *  are required; any further fields (e.g. `sex`, or a `sourceResource`
+   *  legacy EMR already has, before PatientChain existed. `name` is
+   *  required and `dob` optional; any further fields (e.g. `sex`, or a `sourceResource`
    *  carrying the full FHIR Patient resource an ingestion path built) are
    *  stored alongside but not required. The record is encrypted at rest. */
   addLocalPatientRecord(hospitalID, hospitalNumber, { name, dob, ...rest }) {

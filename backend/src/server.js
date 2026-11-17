@@ -23,6 +23,8 @@ const { HospitalRegistry } = require('./services/hospitalRegistry');
 const { ReferenceService } = require('./services/referenceService');
 const { UserDirectory } = require('./services/userDirectory');
 const { Hl7ListenerManager } = require('./services/hl7ListenerManager');
+const { AccountStore } = require('./services/accountStore');
+const { Onboarding } = require('./services/onboarding');
 
 const config = loadConfig();
 
@@ -63,9 +65,18 @@ const auth = createAuth(config.auth, { identityStore });
 // config files (hospitalDirectory.json, hospitalIngestion.json) are
 // imported once.
 const hospitalRegistry = new HospitalRegistry({ db, cipher, production: config.production });
-const imported = hospitalRegistry.importLegacyConfig({ ingestionConfig: loadHospitalIngestionConfig() });
-if (imported) logger.info(`imported ${imported} hospital(s) from config files into the hospital registry`);
+// With password accounts every hospital is created in the UI, so that its
+// admin account is created (and recorded on-chain) with it.
+const passwordMode = config.auth.mode === 'password';
+if (!passwordMode) {
+  const imported = hospitalRegistry.importLegacyConfig({ ingestionConfig: loadHospitalIngestionConfig() });
+  if (imported) logger.info(`imported ${imported} hospital(s) from config files into the hospital registry`);
+}
 const userDirectory = new UserDirectory({ db });
+const accounts = passwordMode ? new AccountStore({ db }) : null;
+const onboarding = passwordMode
+  ? new Onboarding({ accounts, users: userDirectory, hospitals: hospitalRegistry, providers: providerRegistry, ledgerPromise, logger })
+  : null;
 // FR3: on-chain pointers registered at the point of care.
 const referenceService = new ReferenceService({ ledgerPromise, fhirAdapter, logger }).attach();
 
@@ -104,7 +115,10 @@ const listenerManager = new Hl7ListenerManager({
 listenerManager.syncAll().catch((err) => logger.error('starting HL7 listeners failed', { err }));
 
 // ── Demo data (development only; DEMO_SEED=off to disable) ─────────────
-const demoEnabled = !config.production && (process.env.DEMO_SEED || 'on').toLowerCase() !== 'off';
+const demoEnabled = !config.production && !passwordMode && (process.env.DEMO_SEED || 'on').toLowerCase() !== 'off';
+if (passwordMode && (process.env.DEMO_SEED || '').toLowerCase() === 'on') {
+  logger.warn('DEMO_SEED ignored: demo data is never loaded with AUTH_MODE=password');
+}
 if (demoEnabled) {
   const { runDemoSeed } = require('./demo/demoSeed');
   runDemoSeed({
@@ -132,6 +146,8 @@ const app = createApp({
   referenceService,
   demoFhir: demoEnabled,
   cipher,
+  accounts,
+  onboarding,
   startedAt,
 });
 
@@ -146,7 +162,14 @@ server.requestTimeout = 30_000;
 server.headersTimeout = 15_000;
 
 ledgerPromise
-  .then(() => {
+  .then(async () => {
+    if (onboarding) {
+      const first = await onboarding.bootstrapSystemAdmin();
+      if (first) {
+        // Shown once, on the first start only. It must be changed at first sign-in.
+        logger.warn(`FIRST START: system admin account created. Username: ${first.login}  Temporary password: ${first.temporaryPassword}  (change it at first sign-in)`);
+      }
+    }
     server.listen(config.port, () => {
       logger.info(`PatientChain backend listening on ${tlsEnabled ? 'https' : 'http'}://localhost:${config.port}`, {
         ledgerMode: config.ledgerMode,

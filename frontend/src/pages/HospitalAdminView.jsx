@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSession } from '../auth';
 import { useLedgerEvents } from '../ledgerEvents';
+import { TemporaryPassword } from '../components/TemporaryPassword';
 import './admin.css';
 
 /**
@@ -37,6 +38,9 @@ const EVENT_LABELS = {
   BREAK_GLASS_EXTENDED: 'Emergency access extended',
   EMERGENCY_CODE_USED: 'Emergency code used',
   EMERGENCY_CODE_REPLACED: 'Emergency code replaced',
+  ACCOUNT_CREATED: 'Account created',
+  HOSPITAL_REGISTERED: 'Hospital registered',
+  CLINICIAN_STATUS_CHANGED: 'Clinician status changed',
 };
 
 const CLINICAL_ROLES = ['Physician', 'Consultant', 'Nurse', 'Laboratory Scientist', 'Pharmacist', 'Radiographer', 'Medical Records Officer'];
@@ -327,19 +331,174 @@ export function HospitalGrants() {
   );
 }
 
+const STATUS_LABEL = { ACTIVE: 'active', SUSPENDED: 'suspended', INACTIVE: 'inactive in EMR' };
+
+/**
+ * Adds a clinician from the hospital's EMR (password accounts): search by
+ * staff ID or name → pick the person → check what the EMR says → add, which
+ * creates their login and shows a temporary password once.
+ */
+function AddFromEmr({ hospitalID, onAdded, onClose }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [found, setFound] = useState(null);
+  const [added, setAdded] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function run(fn) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Full details (role, department, status) of the person picked.
+  // The email or name helps the EMR find the person picked in one search.
+  const hintFor = (r) => r.email || r.name || undefined;
+  const pick = (r) => run(async () => setFound({ ...(await api.hospitalAdminEmrLookup(hospitalID, r.staffID, hintFor(r))), hint: hintFor(r) }));
+
+  const search = (e) => {
+    e.preventDefault();
+    setFound(null);
+    setResults(null);
+    run(async () => {
+      const answer = await api.hospitalAdminEmrSearch(hospitalID, query.trim());
+      const list = answer.results || [];
+      setResults(list);
+      setTotal(answer.total || list.length);
+      const usable = list.filter((r) => r.usable && !r.alreadyRegistered);
+      if (list.length === 1 && usable.length === 1) {
+        setFound({ ...(await api.hospitalAdminEmrLookup(hospitalID, usable[0].staffID, hintFor(usable[0]))), hint: hintFor(usable[0]) });
+      }
+    });
+  };
+  const add = () =>
+    run(async () => {
+      setAdded(await api.hospitalAdminAddFromEmr(hospitalID, found.staffID, found.hint || found.email || undefined));
+      await onAdded();
+    });
+  const reset = () => { setAdded(null); setFound(null); setResults(null); setQuery(''); };
+
+  return (
+    <div className="config-block">
+      {error && <div className="error-banner">{error}</div>}
+      {added ? (
+        <>
+          <p><strong>{added.provider.name}</strong> is added ({added.provider.role}, {added.provider.department}). Give them these sign-in details:</p>
+          <TemporaryPassword account={added.account} who="The clinician" />
+          <div className="wizard-foot">
+            <span className="spacer" />
+            <button className="btn btn-primary" onClick={reset}>Add another</button>
+            <button className="btn btn-ghost" onClick={onClose}>Done</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <form className="form-grid three" onSubmit={search}>
+            <div className="field span-2">
+              <label htmlFor="emr-search">Name, email or staff ID</label>
+              <input
+                id="emr-search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="e.g. Ngozi Eze, doctor.test@hospital.example or JUTH/00421"
+                autoFocus
+              />
+            </div>
+            <div className="field" style={{ alignSelf: 'end' }}>
+              <button className="btn" type="submit" disabled={busy || query.trim().length < 2}>{busy && !results ? 'Searching…' : 'Search EMR'}</button>
+            </div>
+          </form>
+
+          {results && !found && (
+            results.length ? (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                {total > results.length && (
+                  <p className="hint">Showing {results.length} of {total.toLocaleString()} matches. Type more of the name, or their email, to narrow it down.</p>
+                )}
+                <table className="admin-table">
+                  <thead><tr><th>Name</th><th>Email / staff ID</th><th>Role</th><th>Status in EMR</th><th /></tr></thead>
+                  <tbody>
+                    {results.map((r, i) => (
+                      <tr key={r.staffID || `row-${i}`} className={!r.active ? 'row-muted' : ''}>
+                        <td><div className="cell-title">{r.name || '—'}</div><div className="cell-sub">{r.department || ''}</div></td>
+                        <td className="nowrap">{r.email || r.staffID || <span className="cell-sub">no ID</span>}</td>
+                        <td>{r.role || <span className="cell-sub">—</span>}</td>
+                        <td>{r.active ? 'Active' : 'Not active'}</td>
+                        <td className="cell-actions">
+                          {r.alreadyRegistered ? (
+                            <span className="cell-sub">already added</span>
+                          ) : !r.usable ? (
+                            <span className="cell-sub">{r.staffID ? 'ID not usable' : 'no staff ID in EMR'}</span>
+                          ) : (
+                            <button className="btn btn-ghost" disabled={busy} onClick={() => pick(r)}>Select</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="hint" style={{ marginTop: 12 }}>No one in the EMR matches “{query}”. Check the spelling, or try their email.</p>
+            )
+          )}
+
+          {found && (
+            <div className="review" style={{ marginTop: 12 }}>
+              <div className="data-row"><span className="k">Name</span><span className="v">{found.name || '—'}</span></div>
+              {found.email && <div className="data-row"><span className="k">Email (their sign-in username)</span><span className="v">{found.email}</span></div>}
+              {!found.email && <div className="data-row"><span className="k">Staff ID</span><span className="v">{found.staffID}</span></div>}
+              <div className="data-row"><span className="k">Role</span><span className="v">{found.role || 'not given (Physician)'}</span></div>
+              <div className="data-row"><span className="k">Department</span><span className="v">{found.department || 'not given (General)'}</span></div>
+              <div className="data-row"><span className="k">Status in EMR</span><span className="v">{found.active ? 'Active' : 'Not active'}</span></div>
+              {found.alreadyRegistered && <div className="inline-warn">Already on your clinicians list. Use Re-sync on their row instead.</div>}
+              {!found.active && <div className="inline-warn">The EMR shows this person as not active, so they can’t be added.</div>}
+              {results && results.length > 1 && <button className="btn btn-ghost" onClick={() => setFound(null)}>← Back to the list</button>}
+            </div>
+          )}
+
+          <div className="wizard-foot">
+            <span className="hint">Name, role, department and status come from your EMR and can’t be changed here. Re-sync to pick up EMR changes.</span>
+            <span className="spacer" />
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy || !found || !found.active || found.alreadyRegistered} onClick={add}>
+              {busy && found ? 'Adding…' : 'Add and create login'}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Clinicians() {
   const { data, error, reload } = useHospitalData('clinicians');
+  const { data: overview } = useHospitalData('overview');
   const { hospitalID } = useContext(HospitalContext);
+  const { authMode } = useSession();
+  const passwordAccounts = authMode === 'password';
+  const emr = Boolean(passwordAccounts && overview?.emrConnected);
   const [form, setForm] = useState(null);
+  const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [rowNotice, setRowNotice] = useState(null);
 
   async function save(values) {
     setSaving(true);
     setFormError(null);
     try {
-      await api.hospitalAdminRegisterClinician({ ...values, hospitalID });
+      const result = await api.hospitalAdminRegisterClinician({ ...values, hospitalID });
       setForm(null);
+      if (result.account) setRowNotice({ text: `${result.provider.name} is added. Give them these sign-in details:`, account: result.account });
       await reload();
     } catch (e) {
       setFormError(e.message);
@@ -348,48 +507,86 @@ export function Clinicians() {
     }
   }
 
+  async function rowAction(c, kind) {
+    setRowNotice(null);
+    try {
+      if (kind === 'resync') {
+        const r = await api.hospitalAdminResyncClinician(hospitalID, c.providerID);
+        setRowNotice({ text: r.inEmr ? `${r.provider.name}: updated from the EMR (${STATUS_LABEL[r.provider.status] || r.provider.status}).` : `${c.name} is no longer in the EMR, so they are now inactive here.` });
+      } else if (kind === 'reset') {
+        if (!window.confirm(`Give ${c.name} a new temporary password? Their current password stops working.`)) return;
+        const account = await api.hospitalAdminResetClinicianPassword(hospitalID, c.providerID);
+        setRowNotice({ text: `New temporary password for ${c.name}:`, account });
+      }
+      await reload();
+    } catch (e) {
+      setRowNotice({ text: e.message, error: true });
+    }
+  }
+
+  const emptyManual = { providerID: '', name: '', role: 'Physician', department: '', status: 'ACTIVE', isNew: true };
+
   return (
     <div className="panel">
       {error && <div className="error-banner">{error}</div>}
       <div className="panel-head">
         <div><span className="eyebrow">Hospital staff register</span><h2>Clinicians</h2></div>
-        <button className="btn btn-primary" onClick={() => setForm({ providerID: '', name: '', role: 'Physician', department: '', status: 'ACTIVE', isNew: true })}>+ Register clinician</button>
+        {emr ? (
+          <button className="btn btn-primary" onClick={() => { setAdding(true); setForm(null); }}>+ Add from EMR</button>
+        ) : (
+          <button className="btn btn-primary" onClick={() => { setForm(emptyManual); setAdding(false); }}>+ Register clinician</button>
+        )}
       </div>
       <p className="hint">
-        Only clinicians registered and active here can use a patient’s grant at this hospital. A grant is tied to the clinician’s role:
-        changing someone’s role stops their existing grants working until the patient grants again.
+        {emr
+          ? 'Clinicians come from your EMR (search by name, email or staff ID), and the EMR stays in charge: their name, role, department and active status are copied from it. Their email in the EMR becomes their sign-in username. Re-sync after a change in the EMR; someone the EMR marks inactive or removes can no longer sign in. '
+          : 'Only clinicians registered and active here can use a patient’s grant at this hospital. '}
+        A grant is tied to the clinician’s role: a role change stops their existing grants working until the patient grants again.
       </p>
+      {passwordAccounts && !emr && overview && (
+        <div className="inline-warn">This hospital has no FHIR connection to its EMR, so clinicians are typed in by hand. Ask the system admin to connect the EMR.</div>
+      )}
+      {rowNotice && (
+        <div className={rowNotice.error ? 'error-banner' : 'notice-banner'}>
+          {rowNotice.text}
+          {rowNotice.account && <TemporaryPassword account={rowNotice.account} who="The clinician" />}
+        </div>
+      )}
+      {adding && <AddFromEmr hospitalID={hospitalID} onAdded={reload} onClose={() => setAdding(false)} />}
       {form && (
         <div className="config-block">
           {formError && <div className="error-banner">{formError}</div>}
+          {form.source === 'emr' && <p className="hint">This clinician comes from the EMR: only a local suspension can be set here.</p>}
           <div className="form-grid three">
             <div className="field">
-              <label>Clinician ID</label>
-              <input value={form.providerID} disabled={!form.isNew} onChange={(e) => setForm({ ...form, providerID: e.target.value.trim() })} placeholder="their sign-in name" />
+              <label>{passwordAccounts ? 'Staff ID' : 'Clinician ID'}</label>
+              <input value={form.providerID} disabled={!form.isNew} onChange={(e) => setForm({ ...form, providerID: e.target.value.trim() })} placeholder={passwordAccounts ? 'their staff ID' : 'their sign-in name'} />
             </div>
             <div className="field">
               <label>Full name</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input value={form.name} disabled={form.source === 'emr'} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="field">
               <label>Role</label>
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <select value={form.role} disabled={form.source === 'emr'} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                 {[...new Set([...CLINICAL_ROLES, form.role])].map((r) => <option key={r}>{r}</option>)}
               </select>
             </div>
             <div className="field">
               <label>Department</label>
-              <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+              <input value={form.department} disabled={form.source === 'emr'} onChange={(e) => setForm({ ...form, department: e.target.value })} />
             </div>
             <div className="field">
               <label>Status</label>
               <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="ACTIVE">Active</option>
+                <option value="ACTIVE" disabled={form.source === 'emr' && form.status === 'INACTIVE'}>Active</option>
                 <option value="SUSPENDED">Suspended</option>
+                {form.status === 'INACTIVE' && <option value="INACTIVE">Inactive (EMR)</option>}
               </select>
             </div>
           </div>
           <div className="wizard-foot">
+            {form.isNew && passwordAccounts && <span className="hint">Saving creates their login and shows a temporary password once.</span>}
             <span className="spacer" />
             <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancel</button>
             <button className="btn btn-primary" disabled={saving || !form.providerID} onClick={() => save(form)}>{saving ? 'Saving…' : 'Save'}</button>
@@ -414,7 +611,11 @@ export function Clinicians() {
               <tr key={c.providerID} className={c.status !== 'ACTIVE' ? 'row-muted' : ''}>
                 <td>
                   <div className="cell-title">{c.name}</div>
-                  <div className="cell-sub">{c.providerID}{c.status !== 'ACTIVE' && ' · suspended'}</div>
+                  <div className="cell-sub">
+                    {c.login || c.providerID}
+                    {c.status !== 'ACTIVE' && ` · ${STATUS_LABEL[c.status] || c.status}`}
+                    {c.source === 'emr' && ' · from EMR'}
+                  </div>
                 </td>
                 <td>{c.role}<div className="cell-sub">{c.department}</div></td>
                 <td>{c.recordAccesses}<div className="cell-sub">{c.activeGrants} active grant{c.activeGrants === 1 ? '' : 's'}</div></td>
@@ -423,7 +624,9 @@ export function Clinicians() {
                 <td className="cell-sub nowrap">{fmt(c.lastAccessAt)}</td>
                 <td className="cell-actions">
                   <Link className="btn btn-ghost" to={`/admin/access-log?providerID=${encodeURIComponent(c.providerID)}`}>Activity</Link>
-                  <button className="btn btn-ghost" onClick={() => setForm({ ...c, isNew: false })}>Edit</button>
+                  {emr && c.source === 'emr' && <button className="btn btn-ghost" onClick={() => rowAction(c, 'resync')}>Re-sync</button>}
+                  {passwordAccounts && c.login && <button className="btn btn-ghost" onClick={() => rowAction(c, 'reset')}>Reset password</button>}
+                  <button className="btn btn-ghost" onClick={() => { setForm({ ...c, isNew: false }); setAdding(false); }}>Edit</button>
                 </td>
               </tr>
             ))}

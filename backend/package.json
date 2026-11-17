@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "start:live": "bash scripts/start-live.sh",
     "test": "node --test \"src/**/*.test.js\"",
     "test:hl7-synthetic": "node scripts/sendSyntheticAdt.js",
     "backup": "node scripts/backup.js",

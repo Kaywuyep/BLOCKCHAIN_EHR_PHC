@@ -43,6 +43,7 @@ function loadConfig(env = process.env) {
     auth: {
       // off: no authentication (demo and tests only, refused in production)
       // local: HS256 tokens from POST /api/auth/login (development only)
+      // password: email/username + password accounts kept by this backend
       // oidc: bearer tokens from the hospital's identity provider
       mode: (env.AUTH_MODE || (production ? 'oidc' : 'off')).toLowerCase(),
       jwtSecret: env.AUTH_JWT_SECRET || '',
@@ -96,7 +97,12 @@ function productionProblems(cfg) {
   if (!cfg.production) return [];
   const problems = [];
   if (cfg.ledgerMode !== 'fabric') problems.push('LEDGER_MODE must be "fabric" (the simulated ledger is in-memory)');
-  if (cfg.auth.mode !== 'oidc') problems.push('AUTH_MODE must be "oidc" (off/local are for development only)');
+  if (!['oidc', 'password'].includes(cfg.auth.mode)) {
+    problems.push('AUTH_MODE must be "oidc" or "password" (off/local are for development only)');
+  }
+  if (cfg.auth.mode === 'password' && cfg.auth.jwtSecret.length < 32) {
+    problems.push('AUTH_MODE=password needs AUTH_JWT_SECRET (at least 32 random characters)');
+  }
   if (cfg.auth.mode === 'oidc' && (!cfg.auth.oidcIssuer || !cfg.auth.oidcAudience)) {
     problems.push('OIDC_ISSUER and OIDC_AUDIENCE are required');
   }

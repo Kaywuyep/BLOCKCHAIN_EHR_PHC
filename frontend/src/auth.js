@@ -7,6 +7,8 @@ import { UserManager, WebStorageStateStore } from 'oidc-client-ts';
  * The frontend side of the backend's AUTH_MODE:
  *   off    no login; the demo behaves as before.
  *   local  a development login form (POST /api/auth/login).
+ *   password
+ *          email/username + password accounts; patients sign up here.
  *   oidc   authorization code + PKCE against the hospital's identity
  *          provider, using oidc-client-ts.
  *
@@ -84,6 +86,46 @@ export async function localLogin({ subject, role, hospitalID, providerID }) {
   const body = await res.json();
   if (!res.ok) throw new Error(body.error || 'login failed');
   setToken(body.token);
+}
+
+async function postAuth(path, payload, token) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(payload),
+  });
+  let body = {};
+  try {
+    body = await res.json();
+  } catch {
+    // no JSON body
+  }
+  if (!res.ok) throw new Error(body.error || `request failed (${res.status})`);
+  setToken(body.token);
+  return body;
+}
+
+/** AUTH_MODE=password: sign in with email (patients) or username (staff). */
+export function passwordLogin({ login, password }) {
+  return postAuth('/auth/login', { login, password });
+}
+
+/** AUTH_MODE=password: a patient creates their account. */
+export function signUp({ fullName, email, password }) {
+  return postAuth('/auth/signup', { fullName, email, password });
+}
+
+/** AUTH_MODE=password: change the password (required after a temporary one). */
+export function changePassword({ currentPassword, newPassword }) {
+  return postAuth('/auth/password', { currentPassword, newPassword }, getToken());
+}
+
+/** The rules the backend enforces, checked as the user types. */
+export function passwordHint(password) {
+  if (!password) return null;
+  if (password.length < 10) return 'At least 10 characters';
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) return 'Use at least one letter and one number';
+  return null;
 }
 
 /** The signed-in identity as the backend sees it, or null. */

@@ -3,9 +3,18 @@
 const express = require('express');
 const { randomUUID } = require('crypto');
 const { ROLES, hasRole, actsForHospital, isPatientSelf, deny } = require('../auth/policy');
+const { refreshFromEmr } = require('../services/emrPatientLookup');
 
-function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore = null, referenceService = null) {
+function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore = null, referenceService = null, { hospitalRegistry = null, logger = null } = {}) {
   const router = express.Router();
+
+  // Hospitals with a queryable EMR (FHIR or SmartClinic): read the record
+  // live before checking it. Skipped once the caller is rate-limited, so
+  // the EMR can't be used to enumerate hospital numbers.
+  async function freshen(key, hospitalID, hospitalNumber) {
+    if (linkageService.isRateLimited(key)) return;
+    await refreshFromEmr({ hospitalRegistry, fhirAdapter, logger }, hospitalID, String(hospitalNumber).trim());
+  }
 
   // ledger.getPatient() throws (synchronously, in simulated mode; via a
   // rejected promise in Fabric mode) when the patient doesn't exist. A
@@ -21,17 +30,19 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
   }
 
   // FR1 step 1: before a patient has a DID, they look up the record at the
-  // first hospital they registered with (hospital number + date of birth).
+  // first hospital they registered with (hospital number + name as
+  // registered there; date of birth optional).
   // Same generic answer and rate limit as link-facility.
-  router.post('/register/lookup', (req, res) => {
+  router.post('/register/lookup', async (req, res) => {
     const user = req.user;
     if (!hasRole(user, ROLES.PATIENT)) return deny(res, 'requires role: patient');
-    const { hospitalID, hospitalNumber, dateOfBirth } = req.body || {};
-    if (!hospitalID || !hospitalNumber || !dateOfBirth) {
-      return res.status(400).json({ error: 'hospitalID, hospitalNumber and dateOfBirth are required' });
+    const { hospitalID, hospitalNumber, name, dateOfBirth } = req.body || {};
+    if (!hospitalID || !hospitalNumber || !String(name || '').trim()) {
+      return res.status(400).json({ error: 'hospital, hospital number and your name as registered at the hospital are required' });
     }
     try {
-      res.json(linkageService.linkFacility(`pending:${user.sub}`, hospitalID, hospitalNumber, dateOfBirth));
+      await freshen(`pending:${user.sub}`, hospitalID, hospitalNumber);
+      res.json(linkageService.linkFacility(`pending:${user.sub}`, hospitalID, hospitalNumber, { name, dateOfBirth }));
     } catch (err) {
       if (err.message.startsWith('too many lookup attempts')) return res.status(429).json({ error: err.message });
       res.status(404).json({ error: err.message });
@@ -126,10 +137,13 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
     }
     try {
       const { hospitalNumber, name, dob } = req.body;
-      if (!hospitalNumber || !name || !dob) {
-        return res.status(400).json({ error: 'hospitalNumber, name and dob are required' });
+      if (!String(hospitalNumber || '').trim() || !String(name || '').trim()) {
+        return res.status(400).json({ error: 'hospital number and name are required (date of birth is optional)' });
       }
-      const record = fhirAdapter.addLocalPatientRecord(req.params.hospitalID, hospitalNumber, { name, dob });
+      const record = fhirAdapter.addLocalPatientRecord(req.params.hospitalID, String(hospitalNumber).trim(), {
+        name: String(name).trim(),
+        dob: dob ? String(dob).trim() : null,
+      });
       res.status(201).json(record);
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -147,17 +161,18 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
   // claims a hospital number and date of birth for a hospital they
   // already have a record at. A match returns the record's name so the
   // patient can confirm it's them -- it does not link anything yet. No
-  // match (wrong number OR wrong date of birth -- deliberately
+  // match (wrong number, name OR date of birth -- deliberately
   // indistinguishable) returns a generic 404, and repeated attempts are
   // rate-limited per patient as a second layer against enumeration.
-  router.post('/:did/link-facility', (req, res) => {
+  router.post('/:did/link-facility', async (req, res) => {
     if (!isPatientSelf(req.user, req.params.did)) return deny(res, 'patients can only link facilities to their own DID');
     try {
-      const { hospitalID, hospitalNumber, dateOfBirth } = req.body;
-      if (!hospitalID || !hospitalNumber || !dateOfBirth) {
-        return res.status(400).json({ error: 'hospitalID, hospitalNumber and dateOfBirth are required' });
+      const { hospitalID, hospitalNumber, name, dateOfBirth } = req.body;
+      if (!hospitalID || !hospitalNumber || !String(name || '').trim()) {
+        return res.status(400).json({ error: 'hospital, hospital number and your name as registered at the hospital are required' });
       }
-      const result = linkageService.linkFacility(req.params.did, hospitalID, hospitalNumber, dateOfBirth);
+      await freshen(req.params.did, hospitalID, hospitalNumber);
+      const result = linkageService.linkFacility(req.params.did, hospitalID, hospitalNumber, { name, dateOfBirth });
       res.json(result);
     } catch (err) {
       if (err.message.startsWith('too many lookup attempts')) {

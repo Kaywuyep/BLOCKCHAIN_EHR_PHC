@@ -46,3 +46,22 @@ test('GET /api/audit/events/recent surfaces ledger events, most recent first', a
     await server.close();
   }
 });
+
+test('GET /audit/me returns only the signed-in clinician\'s own ledger entries, newest first', async () => {
+  const server = await createTestServer({ authMode: 'local' });
+  try {
+    const L = server.ledger;
+    L.writeAuditEntry({ entryID: 'm1', patientDID: 'did:p1', eventType: 'RECORD_ACCESSED', actorID: 'dr-a', hospitalID: 'h1', clientTimestamp: '2026-11-01T10:00:00Z' });
+    L.writeAuditEntry({ entryID: 'm2', patientDID: 'did:p2', eventType: 'BREAK_GLASS_ACCESS', actorID: 'dr-a', hospitalID: 'h1', clientTimestamp: '2026-11-02T10:00:00Z' });
+    L.writeAuditEntry({ entryID: 'm3', patientDID: 'did:p1', eventType: 'RECORD_ACCESSED', actorID: 'dr-b', hospitalID: 'h1', clientTimestamp: '2026-11-03T10:00:00Z' });
+    const get = async (token) => fetch(`${server.baseUrl}/api/audit/me`, { headers: { authorization: `Bearer ${token}` } });
+    const drA = await server.login({ subject: 'dr-a', role: 'clinician', hospitalID: 'h1', providerID: 'dr-a' });
+    const res = await get(drA);
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).map((e) => e.entryID), ['m2', 'm1']);
+    const patient = await server.login({ subject: 'p', role: 'patient' });
+    assert.equal((await get(patient)).status, 403);
+  } finally {
+    await server.close();
+  }
+});

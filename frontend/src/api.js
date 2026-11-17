@@ -62,6 +62,7 @@ export const api = {
   checkAccess: (grantID) => request(`/access/${grantID}`),
   getGrantsForPatient: (did) => request(`/access/patient/${encodeURIComponent(did)}`),
   getMyProviderGrants: () => request('/access/provider/me'),
+  getMyActivity: (limit = 100) => request(`/audit/me?limit=${limit}`),
   extendBreakGlass: (grantID, data) => request(`/access/${grantID}/extend`, { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyDetails: (grantID) => request(`/access/${grantID}/emergency-details`),
   getMyGrantsForPatient: (did) => request(`/access/my-grants/${encodeURIComponent(did)}`),
@@ -91,6 +92,17 @@ export const api = {
     return request(`/hospital-admin/${path}${qs ? `?${qs}` : ''}`);
   },
   hospitalAdminRegisterClinician: (data) => request('/hospital-admin/clinicians', { method: 'POST', body: JSON.stringify(data) }),
+  // Password accounts: clinicians come from the hospital's EMR by staff ID.
+  hospitalAdminEmrSearch: (hospitalID, query) =>
+    request('/hospital-admin/clinicians/emr-search', { method: 'POST', body: JSON.stringify({ hospitalID, query }) }),
+  hospitalAdminEmrLookup: (hospitalID, staffID, hint) =>
+    request('/hospital-admin/clinicians/emr-lookup', { method: 'POST', body: JSON.stringify({ hospitalID, staffID, hint }) }),
+  hospitalAdminAddFromEmr: (hospitalID, staffID, hint) =>
+    request('/hospital-admin/clinicians/from-emr', { method: 'POST', body: JSON.stringify({ hospitalID, staffID, hint }) }),
+  hospitalAdminResyncClinician: (hospitalID, providerID) =>
+    request(`/hospital-admin/clinicians/${encodeURIComponent(providerID)}/resync`, { method: 'POST', body: JSON.stringify({ hospitalID }) }),
+  hospitalAdminResetClinicianPassword: (hospitalID, providerID) =>
+    request(`/hospital-admin/clinicians/${encodeURIComponent(providerID)}/reset-password`, { method: 'POST', body: JSON.stringify({ hospitalID }) }),
 
   // System admin: hospitals and users
   adminHospitalOptions: (name) => request(`/admin/hospitals/options${name ? `?name=${encodeURIComponent(name)}` : ''}`),
@@ -100,10 +112,12 @@ export const api = {
   adminSetHospitalStatus: (id, status) =>
     request(`/admin/hospitals/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
   adminTestFhir: (data) => request('/admin/hospitals/test-fhir', { method: 'POST', body: JSON.stringify(data) }),
+  adminTestSmartClinic: (data) => request('/admin/hospitals/test-smartclinic', { method: 'POST', body: JSON.stringify(data) }),
   adminTestHl7: (data) => request('/admin/hospitals/test-hl7', { method: 'POST', body: JSON.stringify(data) }),
   adminListUsers: () => request('/admin/users'),
   adminCreateUser: (data) => request('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
   adminUpdateUser: (subject, data) => request(`/admin/users/${encodeURIComponent(subject)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  adminResetPassword: (subject) => request(`/admin/users/${encodeURIComponent(subject)}/reset-password`, { method: 'POST', body: '{}' }),
   adminSetUserStatus: (subject, status) =>
     request(`/admin/users/${encodeURIComponent(subject)}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
 

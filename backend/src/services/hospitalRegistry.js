@@ -15,6 +15,9 @@ const { resolveFieldMap } = require('./hl7AdtListener');
  *   hl7     the hospital's interface engine sends HL7 v2 ADT messages, over
  *           MLLP (a TCP port we listen on) and/or HTTP POST /api/hl7/adt/:id;
  *   both    ADT feed for registrations/admissions + FHIR for clinical data;
+ *   smartclinic
+ *           the hospital runs SmartClinic (Primed E-Health), which has its
+ *           own REST API instead of FHIR/HL7 (services/smartClinicClient.js);
  *   rest    neither FHIR nor HL7: the vendor or a database-export job
  *           pushes records to POST /api/ingest/:hospitalID (Section 3.4.8);
  *   manual  no live integration; staff keep the patient roster by hand.
@@ -26,7 +29,7 @@ const { resolveFieldMap } = require('./hl7AdtListener');
  * (HL7 settings), so existing setups keep working.
  */
 
-const INTEGRATIONS = ['fhir', 'hl7', 'both', 'rest', 'manual'];
+const INTEGRATIONS = ['fhir', 'hl7', 'both', 'smartclinic', 'rest', 'manual'];
 const HOSPITAL_TYPES = [
   'Primary Health Centre',
   'General Hospital',
@@ -39,7 +42,21 @@ const HOSPITAL_TYPES = [
 const HL7_VERSIONS = ['2.3', '2.3.1', '2.4', '2.5', '2.5.1', '2.6', '2.7'];
 const FHIR_AUTH_TYPES = ['client-secret', 'private-key-jwt', 'none'];
 const DEFAULT_FHIR_SCOPE =
-  'system/Patient.read system/Observation.read system/Encounter.read system/MedicationRequest.read system/Condition.read';
+  'system/Patient.read system/Observation.read system/Encounter.read system/MedicationRequest.read system/Condition.read system/Practitioner.read system/PractitionerRole.read';
+// SmartClinic (Primed E-Health) defaults, read from the SmartClinic web
+// app's own code: staff/login takes { data: { username, password } } and
+// returns { token }; other calls carry ?token=.
+const SMARTCLINIC_DEFAULTS = Object.freeze({
+  loginPath: 'staff/login',
+  patientSearchPath: 'patient/v2/search-Patient-By-HospitalNo?hospital_number={hospitalNumber}',
+  // SmartClinic searches staff itself (name, email…); answers come in pages.
+  staffSearchPath: 'staff/v2/staffs?search={query}&page=1&limit=50',
+});
+// Where each value sits in SmartClinic's answers. Blank = detected automatically.
+const SMARTCLINIC_FIELDS = [
+  'patientList', 'patientHospitalNumber', 'patientName', 'patientDob',
+  'staffList', 'staffId', 'staffEmail', 'staffName', 'staffRole', 'staffDepartment', 'staffActive',
+];
 const MLLP_PORT_MIN = 1024;
 const MLLP_PORT_MAX = 65535;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
@@ -82,10 +99,11 @@ class HospitalRegistry {
       get: q('SELECT * FROM hospitals WHERE hospital_id = ?'),
       count: q('SELECT COUNT(*) AS n FROM hospitals'),
       insert: q(`INSERT INTO hospitals
-        (hospital_id, name, location, type, integration, fhir_json, fhir_secret_enc, hl7_json, status, created_at, updated_at, created_by)
-        VALUES (@hospitalID, @name, @location, @type, @integration, @fhirJson, @fhirSecretEnc, @hl7Json, @status, @now, @now, @createdBy)`),
+        (hospital_id, name, location, type, integration, fhir_json, fhir_secret_enc, hl7_json, emr_json, emr_secret_enc, status, created_at, updated_at, created_by)
+        VALUES (@hospitalID, @name, @location, @type, @integration, @fhirJson, @fhirSecretEnc, @hl7Json, @emrJson, @emrSecretEnc, @status, @now, @now, @createdBy)`),
       update: q(`UPDATE hospitals SET name = @name, location = @location, type = @type, integration = @integration,
-        fhir_json = @fhirJson, fhir_secret_enc = @fhirSecretEnc, hl7_json = @hl7Json, status = @status, updated_at = @now
+        fhir_json = @fhirJson, fhir_secret_enc = @fhirSecretEnc, hl7_json = @hl7Json, emr_json = @emrJson, emr_secret_enc = @emrSecretEnc,
+        status = @status, updated_at = @now
         WHERE hospital_id = @hospitalID`),
     };
   }
@@ -136,13 +154,19 @@ class HospitalRegistry {
 
   // ── Writes ───────────────────────────────────────────────────────────
 
-  create(input, { createdBy } = {}) {
+  /** Validates a new hospital without saving it. Returns the cleaned record. */
+  checkNew(input) {
     const hospitalID = String(input.hospitalID || slugify(input.name)).trim();
     if (!ID_PATTERN.test(hospitalID)) {
       throw new ValidationError('hospitalID must be 3-64 characters: lower-case letters, digits and hyphens');
     }
     if (this.sql.get.get(hospitalID)) throw new ValidationError(`a hospital with ID "${hospitalID}" already exists`);
-    const clean = this._validate({ ...input, hospitalID }, null);
+    return this._validate({ ...input, hospitalID }, null);
+  }
+
+  create(input, { createdBy } = {}) {
+    const clean = this.checkNew(input);
+    const { hospitalID } = clean;
     this.sql.insert.run({ ...clean, now: new Date().toISOString(), createdBy: createdBy || null });
     return this.get(hospitalID);
   }
@@ -157,6 +181,7 @@ class HospitalRegistry {
       hospitalID,
       fhir: input.fhir === undefined ? existing.fhir : input.fhir,
       hl7: input.hl7 === undefined ? existing.hl7 : input.hl7,
+      smartclinic: input.smartclinic === undefined ? existing.smartclinic : input.smartclinic,
     };
     const clean = this._validate(merged, existing);
     this.sql.update.run({ ...clean, now: new Date().toISOString() });
@@ -276,6 +301,9 @@ class HospitalRegistry {
         tokenUrl: authType === 'none' ? '' : tokenUrl,
         clientId: authType === 'none' ? '' : clientId,
         mrnIdentifierSystem,
+        // URI on Practitioner.identifier for the hospital's staff ID; blank
+        // searches any identifier system.
+        staffIdentifierSystem: String(f.staffIdentifierSystem || '').trim(),
         scope: String(f.scope || DEFAULT_FHIR_SCOPE).trim(),
       };
       // A blank secret on update keeps the stored one.
@@ -322,6 +350,38 @@ class HospitalRegistry {
       hl7 = { mllpEnabled, mllpPort, httpEnabled, hl7Version, allowedIps, bindAddress, fieldMap };
     }
 
+    let smartclinic = null;
+    let emrSecretEnc = null;
+    if (integration === 'smartclinic') {
+      const c = input.smartclinic || {};
+      const allowHttp = !this.production;
+      const baseUrl = String(c.baseUrl || '').trim();
+      if (!isHttpUrl(baseUrl, { allowHttp })) {
+        throw new ValidationError(`SmartClinic API URL must be a valid ${allowHttp ? 'http(s)' : 'https'} URL, e.g. http://10.0.0.20:8001/v1/`);
+      }
+      const username = String(c.username || '').trim();
+      if (!username) throw new ValidationError('SmartClinic username is required (the API account JUTH created for Cevruni)');
+      const clean = (v, max = 300) => String(v || '').trim().slice(0, max);
+      const fieldMap = {};
+      for (const [k, v] of Object.entries(c.fieldMap || {})) {
+        if (!SMARTCLINIC_FIELDS.includes(k)) throw new ValidationError(`unknown SmartClinic field "${k}"`);
+        if (v && !/^[\w.$-]+(\s*\+\s*[\w.$-]+)*$/.test(String(v).trim())) throw new ValidationError(`invalid field path "${v}" for ${k}`);
+        if (v) fieldMap[k] = String(v).trim();
+      }
+      smartclinic = {
+        baseUrl: baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`,
+        username,
+        loginPath: clean(c.loginPath) || SMARTCLINIC_DEFAULTS.loginPath,
+        patientSearchPath: clean(c.patientSearchPath) || SMARTCLINIC_DEFAULTS.patientSearchPath,
+        staffSearchPath: clean(c.staffSearchPath) || SMARTCLINIC_DEFAULTS.staffSearchPath,
+        fieldMap,
+      };
+      const password = typeof c.password === 'string' ? c.password : '';
+      if (password) emrSecretEnc = this.cipher.encrypt(password);
+      else if (existing && existing._emrSecret) emrSecretEnc = this.cipher.encrypt(existing._emrSecret);
+      else throw new ValidationError('SmartClinic password is required');
+    }
+
     return {
       hospitalID: input.hospitalID,
       name,
@@ -332,12 +392,16 @@ class HospitalRegistry {
       fhirJson: fhir ? JSON.stringify(fhir) : null,
       fhirSecretEnc,
       hl7Json: hl7 ? JSON.stringify(hl7) : null,
+      emrJson: smartclinic ? JSON.stringify(smartclinic) : null,
+      emrSecretEnc,
     };
   }
 
   _fromRow(row, { withSecret = false } = {}) {
     const fhir = row.fhir_json ? JSON.parse(row.fhir_json) : null;
     if (fhir) fhir.hasClientSecret = Boolean(row.fhir_secret_enc);
+    const smartclinic = row.emr_json ? JSON.parse(row.emr_json) : null;
+    if (smartclinic) smartclinic.hasPassword = Boolean(row.emr_secret_enc);
     const out = {
       hospitalID: row.hospital_id,
       name: row.name,
@@ -347,12 +411,16 @@ class HospitalRegistry {
       status: row.status,
       fhir,
       hl7: row.hl7_json ? JSON.parse(row.hl7_json) : null,
+      smartclinic,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       createdBy: row.created_by,
     };
     if (withSecret && row.fhir_secret_enc) {
       Object.defineProperty(out, '_fhirSecret', { value: this.cipher.decrypt(row.fhir_secret_enc), enumerable: false });
+    }
+    if (withSecret && row.emr_secret_enc) {
+      Object.defineProperty(out, '_emrSecret', { value: this.cipher.decrypt(row.emr_secret_enc), enumerable: false });
     }
     return out;
   }
@@ -367,4 +435,6 @@ module.exports = {
   HL7_VERSIONS,
   FHIR_AUTH_TYPES,
   DEFAULT_FHIR_SCOPE,
+  SMARTCLINIC_DEFAULTS,
+  SMARTCLINIC_FIELDS,
 };

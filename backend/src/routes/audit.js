@@ -28,6 +28,22 @@ function auditRouter(ledgerPromise, { db = null, logger = null } = {}) {
     }
   });
 
+  // The signed-in clinician's own trail on the ledger: records opened,
+  // emergency accesses, extensions, emergency codes used (newest first).
+  router.get('/me', async (req, res) => {
+    if (!hasRole(req.user, ROLES.CLINICIAN)) return deny(res, 'requires clinician role');
+    const actor = req.user.superuser ? String(req.query.providerID || '') : req.user.providerID;
+    if (!actor) return res.status(400).json({ error: 'no provider ID on this account' });
+    try {
+      const ledger = await ledgerPromise;
+      const entries = (ledger.getAuditTrailForActor ? await ledger.getAuditTrailForActor(actor) : []) || [];
+      const limit = Math.min(Number(req.query.limit) || 100, 500);
+      res.json(entries.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, limit));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   router.get('/events/recent', async (req, res) => {
     if (!hasRole(req.user, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) return deny(res, 'requires role: hospital_admin');
     try {

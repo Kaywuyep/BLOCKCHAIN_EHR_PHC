@@ -50,7 +50,7 @@ test('golden path: create Health ID, link a second hospital, request, approve, v
   await test.step('the patient adds their second hospital to their network', async () => {
     await gotoNav(patientPage, 'My Hospitals');
     await expect(networkPanel(patientPage)).toContainText(H.langtang.name);
-    await lookUpFacility(patientPage, { search: 'Wase', hospitalName: H.wase.name, hospitalNumber: wasNumber, dob });
+    await lookUpFacility(patientPage, { search: 'Wase', hospitalName: H.wase.name, hospitalNumber: wasNumber, name, dob });
     await expect(patientPage.getByText(name, { exact: true })).toBeVisible();
     await patientPage.getByRole('button', { name: 'Yes, add to my network' }).click();
     await expect(networkPanel(patientPage).getByRole('heading')).toHaveText('My Hospital Network (2)');
@@ -60,6 +60,8 @@ test('golden path: create Health ID, link a second hospital, request, approve, v
   await test.step('a Langtang clinician finds the patient by their Langtang number and requests the Wase records', async () => {
     await signIn(clinicianPage, { role: 'clinician', subject: providerID, hospitalID: H.langtang.id });
     await expect(clinicianPage).toHaveURL(/\/clinician$/);
+    await expect(clinicianPage.getByRole('heading', { name: 'Ready to open' })).toBeVisible();
+    await gotoNav(clinicianPage, 'Request Access');
     await field(clinicianPage, `Patient’s hospital number at ${H.langtang.name}`).locator('input').fill(lagNumber);
     await clinicianPage.getByRole('button', { name: 'Find patient' }).click();
     await expect(clinicianPage.getByRole('heading', { name: new RegExp(name) })).toBeVisible();

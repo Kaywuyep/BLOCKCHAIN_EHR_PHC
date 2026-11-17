@@ -196,7 +196,7 @@ const timed = async (fn) => { const s = Date.now(); const r = await fn(); r.ms =
 
   console.log('\n== registration + first-facility link (Hauwa) ==');
   const hauwa = await as('hauwa-' + Date.now(), 'patient');
-  const lu = await hauwa.post('/patients/register/lookup', { hospitalID: L, hospitalNumber: 'LTG-2001', dateOfBirth: '1993-05-20' });
+  const lu = await hauwa.post('/patients/register/lookup', { hospitalID: L, hospitalNumber: 'LTG-2001', name: 'Hauwa Danjuma', dateOfBirth: '1993-05-20' });
   check('registration lookup', lu.status === 200, lu.json);
   const reg = await timed(() => hauwa.post('/patients/register', { firstFacility: { hospitalID: L, hospitalNumber: 'LTG-2001', dateOfBirth: '1993-05-20' } }));
   check(`register DID on Fabric (${reg.ms} ms)`, reg.status === 200 || reg.status === 201, reg.json);

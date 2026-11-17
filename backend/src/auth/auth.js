@@ -12,6 +12,11 @@ const { SignJWT, jwtVerify, createRemoteJWKSet } = require('jose');
  *                    against its published signing keys, issuer and
  *                    audience. Role/hospital/provider claim names are
  *                    configurable (see config.js).
+ *   AUTH_MODE=password
+ *                    Pilot / production without an IdP. Email-or-username
+ *                    and password accounts (services/accountStore.js);
+ *                    patients sign up, staff get temporary passwords. The
+ *                    backend issues HS256 tokens.
  *   AUTH_MODE=local  Development. POST /api/auth/login issues HS256 tokens
  *                    for any identity, with no password. Refused in
  *                    production.
@@ -58,12 +63,13 @@ class IdentityStore {
 
 function createAuth(authConfig, { identityStore } = {}) {
   const mode = authConfig.mode;
-  if (!['off', 'local', 'oidc'].includes(mode)) throw new Error(`unknown AUTH_MODE "${mode}"`);
-  if (mode === 'local' && authConfig.jwtSecret.length < 32) {
-    throw new Error('AUTH_MODE=local requires AUTH_JWT_SECRET of at least 32 characters');
+  if (!['off', 'local', 'password', 'oidc'].includes(mode)) throw new Error(`unknown AUTH_MODE "${mode}"`);
+  const selfIssued = mode === 'local' || mode === 'password';
+  if (selfIssued && authConfig.jwtSecret.length < 32) {
+    throw new Error(`AUTH_MODE=${mode} requires AUTH_JWT_SECRET of at least 32 characters`);
   }
 
-  const localKey = mode === 'local' ? new TextEncoder().encode(authConfig.jwtSecret) : null;
+  const localKey = selfIssued ? new TextEncoder().encode(authConfig.jwtSecret) : null;
   let remoteJwks = null;
 
   async function oidcKeys() {
@@ -90,6 +96,7 @@ function createAuth(authConfig, { identityStore } = {}) {
       patientDID: claimAt(payload, authConfig.patientDidClaim) || null,
       superuser: false,
     };
+    if (payload.pwd_change === true) user.mustChangePassword = true;
     if (!user.patientDID && roles.includes(ROLES.PATIENT) && identityStore) {
       user.patientDID = identityStore.patientDidFor(user.sub);
     }
@@ -97,7 +104,7 @@ function createAuth(authConfig, { identityStore } = {}) {
   }
 
   async function verify(token) {
-    if (mode === 'local') {
+    if (selfIssued) {
       const { payload } = await jwtVerify(token, localKey, { issuer: 'patientchain-local', audience: 'patientchain' });
       return toUser(payload);
     }
@@ -126,19 +133,21 @@ function createAuth(authConfig, { identityStore } = {}) {
     }
   }
 
-  /** AUTH_MODE=local only: issues a development token. */
-  async function issueLocalToken({ sub, roles, hospitalID, providerID }) {
-    if (mode !== 'local') throw new Error('local login is only available with AUTH_MODE=local');
+  /** AUTH_MODE=local or password: issues a token signed by this backend. */
+  async function issueLocalToken({ sub, roles, hospitalID, providerID, mustChangePassword = false }) {
+    if (!selfIssued) throw new Error('this backend only issues tokens with AUTH_MODE=local or password');
     const claims = { roles: roles.filter((r) => ALL_ROLES.has(r)) };
     if (hospitalID) claims.hospital_id = hospitalID;
     if (providerID) claims.provider_id = providerID;
+    if (mustChangePassword) claims.pwd_change = true;
     return new SignJWT(claims)
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(sub)
       .setIssuer('patientchain-local')
       .setAudience('patientchain')
       .setIssuedAt()
-      .setExpirationTime(`${authConfig.tokenTtlSeconds}s`)
+      // A temporary-password token only lets the user change the password.
+      .setExpirationTime(`${mustChangePassword ? Math.min(900, authConfig.tokenTtlSeconds) : authConfig.tokenTtlSeconds}s`)
       .sign(localKey);
   }
 

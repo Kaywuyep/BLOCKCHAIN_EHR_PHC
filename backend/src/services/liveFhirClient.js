@@ -44,7 +44,7 @@ function tlsOptions(fhir) {
   return opts;
 }
 
-function request(url, { method = 'GET', headers = {}, body, fhir }) {
+function request(url, { method = 'GET', headers = {}, body, fhir, timeoutMs = TIMEOUT_MS }) {
   const u = new URL(url);
   const isHttps = u.protocol === 'https:';
   if (!isHttps && (process.env.NODE_ENV || '').toLowerCase() === 'production') {
@@ -54,7 +54,7 @@ function request(url, { method = 'GET', headers = {}, body, fhir }) {
   return new Promise((resolve, reject) => {
     const req = lib.request(
       u,
-      { method, headers, timeout: TIMEOUT_MS, ...(isHttps ? tlsOptions(fhir) : {}) },
+      { method, headers, timeout: timeoutMs, ...(isHttps ? tlsOptions(fhir) : {}) },
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
@@ -70,7 +70,7 @@ function request(url, { method = 'GET', headers = {}, body, fhir }) {
         });
       }
     );
-    req.on('timeout', () => req.destroy(new LiveFhirError(`no answer from ${u.host} within ${TIMEOUT_MS / 1000}s`)));
+    req.on('timeout', () => req.destroy(new LiveFhirError(`no answer from ${u.host} within ${timeoutMs / 1000}s`)));
     req.on('error', reject);
     if (body) req.write(body);
     req.end();
@@ -157,4 +157,114 @@ async function fetchPatientResources(hospital, hospitalNumber, resourceTypes) {
   return out;
 }
 
-module.exports = { fetchPatientResources, request, LiveFhirError, _tokenCache: tokenCache };
+
+function humanName(names) {
+  const n = (names || []).find((x) => x.use === 'official') || (names || [])[0];
+  if (!n) return null;
+  if (n.text) return String(n.text).trim();
+  return [...(n.prefix || []), ...(n.given || []), n.family].filter(Boolean).join(' ').trim() || null;
+}
+
+function conceptText(c) {
+  if (!c) return null;
+  return c.text || (c.coding || []).map((x) => x.display || x.code).find(Boolean) || null;
+}
+
+/**
+ * Looks a staff member up in the hospital's EMR by their staff ID:
+ * Practitioner?identifier=<staffIdentifierSystem>|<staffID>, then their
+ * PractitionerRole(s) for job title, department and whether the role is
+ * active. The EMR is the authority: Cevruni copies what it says and never
+ * overrides it.
+ *
+ * Returns { staffID, name, role, department, active, practitionerId }, or
+ * throws LiveFhirError (not found, several matches, server error).
+ */
+async function fetchPractitioner(hospital, staffID) {
+  const fhir = hospital.fhir;
+  if (!fhir || !fhir.baseUrl) throw new LiveFhirError('this hospital has no FHIR connection to its EMR');
+  const base = fhir.baseUrl.replace(/\/+$/, '');
+  const token = await accessToken(hospital);
+  const identifier = fhir.staffIdentifierSystem ? `${fhir.staffIdentifierSystem}|${staffID}` : String(staffID);
+  const search = await getJson(`${base}/Practitioner?identifier=${encodeURIComponent(identifier)}`, hospital, token);
+  const matches = (search.entry || []).map((e) => e.resource).filter((r) => r && r.resourceType === 'Practitioner');
+  if (matches.length !== 1) {
+    throw new LiveFhirError(
+      matches.length
+        ? `${matches.length} staff records in the EMR have the ID ${staffID}; refusing to guess`
+        : `no staff member with the ID ${staffID} in the hospital's EMR`
+    );
+  }
+  const p = matches[0];
+  let roles = [];
+  try {
+    const rb = await getJson(`${base}/PractitionerRole?practitioner=${encodeURIComponent(p.id)}`, hospital, token);
+    roles = (rb.entry || [])
+      .map((e) => e.resource)
+      .filter((r) => r && r.resourceType === 'PractitionerRole')
+      .filter((r) => !r.practitioner || !r.practitioner.reference || r.practitioner.reference.endsWith(`Practitioner/${p.id}`));
+  } catch {
+    // Some EMRs don't expose PractitionerRole; Practitioner alone is enough.
+  }
+  const now = Date.now();
+  const current = (r) =>
+    r.active !== false && (!r.period || !r.period.end || new Date(r.period.end).getTime() > now);
+  const role = roles.find(current) || null;
+  const qualification = (p.qualification || [])[0];
+  return {
+    staffID: String(staffID),
+    practitionerId: p.id,
+    name: humanName(p.name),
+    role: (role && conceptText((role.code || [])[0])) || conceptText(qualification && qualification.code) || null,
+    department: (role && (conceptText((role.specialty || [])[0]) || (role.organization && role.organization.display))) || null,
+    email: ((p.telecom || []).find((t) => t.system === 'email' && t.value) || {}).value?.toLowerCase() || null,
+    // Inactive in the EMR, or every role there has ended: not active here either.
+    active: p.active !== false && (roles.length === 0 || Boolean(role)),
+  };
+}
+
+/** { hospitalNumber, name, dob } for exactly one Patient with this hospital number, or null. */
+async function findPatientDemographics(hospital, hospitalNumber) {
+  const fhir = hospital.fhir;
+  const base = fhir.baseUrl.replace(/\/+$/, '');
+  const token = await accessToken(hospital);
+  const search = await getJson(
+    `${base}/Patient?identifier=${encodeURIComponent(`${fhir.mrnIdentifierSystem}|${hospitalNumber}`)}`,
+    hospital,
+    token
+  );
+  const matches = (search.entry || []).map((e) => e.resource).filter((r) => r && r.resourceType === 'Patient');
+  if (matches.length !== 1) return null;
+  const name = humanName(matches[0].name);
+  return name ? { hospitalNumber: String(hospitalNumber), name, dob: matches[0].birthDate || null } : null;
+}
+
+/**
+ * Search staff by staff ID or name. A staff ID is looked up exactly
+ * (with role and department); otherwise Practitioner?name= is used, and
+ * role/department are read when one is picked (fetchPractitioner).
+ */
+async function searchPractitioners(hospital, query, { limit = 20 } = {}) {
+  const q = String(query || '').trim();
+  const out = [];
+  try {
+    out.push(await fetchPractitioner(hospital, q));
+  } catch (err) {
+    if (!/no staff member/.test(err.message)) throw err;
+  }
+  if (!/[a-z]{2}/i.test(q)) return out;
+  const fhir = hospital.fhir;
+  const base = fhir.baseUrl.replace(/\/+$/, '');
+  const token = await accessToken(hospital);
+  const bundle = await getJson(`${base}/Practitioner?name=${encodeURIComponent(q)}&_count=${limit}`, hospital, token);
+  for (const p of (bundle.entry || []).map((e) => e.resource).filter((r) => r && r.resourceType === 'Practitioner')) {
+    const ids = p.identifier || [];
+    const id = (fhir.staffIdentifierSystem ? ids.find((i) => i.system === fhir.staffIdentifierSystem) : ids[0]) || null;
+    const staffID = id && id.value ? String(id.value) : null;
+    if (staffID && out.some((o) => o.staffID === staffID)) continue;
+    out.push({ staffID, practitionerId: p.id, name: humanName(p.name), role: null, department: null, active: p.active !== false });
+  }
+  return { results: out.slice(0, limit), total: out.length };
+}
+
+module.exports = { searchPractitioners, findPatientDemographics, fetchPractitioner, fetchPatientResources, request, LiveFhirError, _tokenCache: tokenCache };

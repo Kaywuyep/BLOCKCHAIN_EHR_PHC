@@ -79,10 +79,10 @@ test('FR1: a patient cannot create a Health ID before confirming a record at the
     const p = api(server, await server.login({ subject: 'new', role: 'patient' }));
     assert.equal((await p.post('/patients/register', {})).status, 400);
     server.fhirAdapter.addLocalPatientRecord(H, 'N-1', { name: 'New Person', dob: '2000-02-02' });
-    assert.equal((await p.post('/patients/register/lookup', { hospitalID: H, hospitalNumber: 'N-1', dateOfBirth: '1999-01-01' })).status, 404);
+    assert.equal((await p.post('/patients/register/lookup', { hospitalID: H, hospitalNumber: 'N-1', name: 'New Person', dateOfBirth: '1999-01-01' })).status, 404);
     // Skipping the lookup is refused.
     assert.equal((await p.post('/patients/register', { firstFacility: { hospitalID: H, hospitalNumber: 'N-1' } })).status, 400);
-    const look = await p.post('/patients/register/lookup', { hospitalID: H, hospitalNumber: 'N-1', dateOfBirth: '2000-02-02' });
+    const look = await p.post('/patients/register/lookup', { hospitalID: H, hospitalNumber: 'N-1', name: 'New Person', dateOfBirth: '2000-02-02' });
     assert.equal(look.body.name, 'New Person');
     const reg = await p.post('/patients/register', { firstFacility: { hospitalID: H, hospitalNumber: 'N-1' } });
     assert.equal(reg.status, 201);

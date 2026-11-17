@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useSession } from '../auth';
+import { TemporaryPassword } from '../components/TemporaryPassword';
 import './admin.css';
 
 /**
@@ -24,12 +25,15 @@ const SOURCE_LABEL = {
   created: 'Added by admin',
   'provider-registry': 'Clinician registry',
   'patient-registration': 'Patient registration',
+  signup: 'Signed up',
 };
 
 const EMPTY = { subject: '', displayName: '', role: 'clinician', hospitalID: '', providerID: '' };
 
 export function UserDirectory() {
-  const { session } = useSession();
+  const { session, authMode } = useSession();
+  const passwordAccounts = authMode === 'password';
+  const [issued, setIssued] = useState(null);
   const [users, setUsers] = useState([]);
   const [hospitals, setHospitals] = useState([]);
   const [error, setError] = useState(null);
@@ -63,7 +67,7 @@ export function UserDirectory() {
     if (hospitalFilter !== 'all' && (u.hospitalID || '') !== hospitalFilter) return false;
     if (q) {
       const needle = q.toLowerCase();
-      return [u.subject, u.displayName, u.hospitalName, u.patientDID, u.department].some((v) => v && v.toLowerCase().includes(needle));
+      return [u.subject, u.login, u.displayName, u.hospitalName, u.patientDID, u.department].some((v) => v && v.toLowerCase().includes(needle));
     }
     return true;
   });
@@ -72,7 +76,7 @@ export function UserDirectory() {
     setSaving(true);
     setError(null);
     try {
-      await api.adminCreateUser({
+      const created = await api.adminCreateUser({
         subject: form.subject,
         displayName: form.displayName,
         roles: [form.role],
@@ -81,11 +85,22 @@ export function UserDirectory() {
       });
       setForm(EMPTY);
       setAdding(false);
+      if (created.account) setIssued({ text: `${created.displayName || created.subject} is added. Give them these sign-in details:`, account: created.account });
       await load();
     } catch (e) {
       setError(e.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function resetPassword(u) {
+    if (!window.confirm(`Give ${u.displayName || u.subject} a new temporary password? Their current password stops working.`)) return;
+    try {
+      const account = await api.adminResetPassword(u.subject);
+      setIssued({ text: `New temporary password for ${u.displayName || u.subject}:`, account });
+    } catch (e) {
+      setError(e.message);
     }
   }
 
@@ -103,13 +118,20 @@ export function UserDirectory() {
   return (
     <div>
       {error && <div className="error-banner">{error}</div>}
+      {issued && (
+        <div className="notice-banner">
+          {issued.text}
+          <TemporaryPassword account={issued.account} who="They" />
+          <button className="btn btn-ghost" onClick={() => setIssued(null)}>Dismiss</button>
+        </div>
+      )}
       <div className="panel">
         <div className="panel-head">
           <div>
             <span className="eyebrow">System admin</span>
             <h2>Users</h2>
           </div>
-          <button className="btn btn-primary" onClick={() => setAdding((a) => !a)}>{adding ? 'Close' : '+ Add user'}</button>
+          <button className="btn btn-primary" onClick={() => { setAdding((a) => !a); if (passwordAccounts && ['patient', 'clinician'].includes(form.role)) setForm({ ...form, role: 'hospital_admin' }); }}>{adding ? 'Close' : '+ Add user'}</button>
         </div>
 
         {adding && (
@@ -126,7 +148,9 @@ export function UserDirectory() {
               <div className="field">
                 <label>Role</label>
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {Object.entries(ROLE_INFO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  {Object.entries(ROLE_INFO)
+                    .filter(([k]) => !passwordAccounts || !['patient', 'clinician'].includes(k))
+                    .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
               {needsHospital && (
@@ -147,9 +171,11 @@ export function UserDirectory() {
             </div>
             <div className="wizard-foot">
               <span className="hint">
-                {form.role === 'patient'
-                  ? 'Patients normally register themselves in the Patient Portal.'
-                  : 'The user signs in through the identity provider; their role and hospital are fixed here.'}
+                {passwordAccounts
+                  ? 'The user ID is their username. A temporary password is shown once after saving. Patients sign up themselves; clinicians are added by their hospital admin from the EMR.'
+                  : form.role === 'patient'
+                    ? 'Patients normally register themselves in the Patient Portal.'
+                    : 'The user signs in through the identity provider; their role and hospital are fixed here.'}
               </span>
               <span className="spacer" />
               <button className="btn btn-primary" onClick={addUser} disabled={saving || !form.subject || (needsHospital && !form.hospitalID)}>
@@ -193,7 +219,7 @@ export function UserDirectory() {
                   <td>
                     <div className="cell-title">{u.displayName || u.subject}</div>
                     <div className="cell-sub">
-                      {u.displayName && u.subject}
+                      {u.login || (u.displayName && u.subject)}
                       {u.patientDID && <span className="mono"> {u.patientDID.length > 28 ? `${u.patientDID.slice(0, 28)}…` : u.patientDID}</span>}
                       {u.department && ` · ${u.department}`}
                     </div>
@@ -206,6 +232,9 @@ export function UserDirectory() {
                   <td className="cell-sub">{SOURCE_LABEL[u.source] || u.source}</td>
                   <td className="cell-sub">{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'never'}</td>
                   <td className="cell-actions">
+                    {passwordAccounts && u.hasPassword && u.subject !== session?.sub && (
+                      <button className="btn btn-ghost" onClick={() => resetPassword(u)}>Reset password</button>
+                    )}
                     {u.subject !== session?.sub && (
                       <button className={`btn ${u.status === 'disabled' ? 'btn-ghost' : 'btn-danger'}`} onClick={() => toggle(u)}>
                         {u.status === 'disabled' ? 'Enable' : 'Disable'}

@@ -30,6 +30,11 @@ export function field(page, labelText) {
   return page.locator(`div.field:has(> label:text-is(${JSON.stringify(labelText)}))`);
 }
 
+/** A form field whose label starts with `labelText` (e.g. "Date of birth" + an "optional" tag). */
+export function fieldStarting(page, labelText) {
+  return page.locator(`div.field:has(> label:has-text(${JSON.stringify(labelText)}))`);
+}
+
 // The same, for the sign-in form (`.login-field`).
 export function loginField(page, labelText) {
   return page.locator(`div.login-field:has(> label:text-is(${JSON.stringify(labelText)}))`);
@@ -116,17 +121,17 @@ export async function admitViaHl7(hospitalID, { hospitalNumber, family, given, d
 
 /**
  * A patient account with a Health ID created through the API, linked to
- * the given hospitals (each needs a roster record matching name/dob). The
+ * the given hospitals (each needs a roster record with this name and dob). The
  * patient has no device key (keyless), so approvals need no signature.
  */
-export async function patientWithNetwork(subject, dob, links) {
+export async function patientWithNetwork(subject, dob, links, name) {
   const token = await apiLogin({ role: 'patient', subject });
   const [first, ...rest] = links;
-  await ok(apiCall(token, 'POST', '/patients/register/lookup', { hospitalID: first.hospitalID, hospitalNumber: first.hospitalNumber, dateOfBirth: dob }), 'register lookup');
+  await ok(apiCall(token, 'POST', '/patients/register/lookup', { hospitalID: first.hospitalID, hospitalNumber: first.hospitalNumber, name, dateOfBirth: dob }), 'register lookup');
   const reg = await ok(apiCall(token, 'POST', '/patients/register', { firstFacility: { hospitalID: first.hospitalID, hospitalNumber: first.hospitalNumber } }), 'register');
   const did = reg.patient.patientDID;
   for (const l of rest) {
-    await ok(apiCall(token, 'POST', `/patients/${encodeURIComponent(did)}/link-facility`, { hospitalID: l.hospitalID, hospitalNumber: l.hospitalNumber, dateOfBirth: dob }), 'link-facility');
+    await ok(apiCall(token, 'POST', `/patients/${encodeURIComponent(did)}/link-facility`, { hospitalID: l.hospitalID, hospitalNumber: l.hospitalNumber, name, dateOfBirth: dob }), 'link-facility');
     await ok(apiCall(token, 'POST', `/patients/${encodeURIComponent(did)}/confirm-link`, { hospitalID: l.hospitalID, hospitalNumber: l.hospitalNumber }), 'confirm-link');
   }
   return { did, token };
@@ -151,16 +156,17 @@ export async function signIn(page, { role, subject, hospitalID }) {
 }
 
 /** My Health ID: look up the first hospital's record (does not confirm). */
-export async function lookUpFirstHospital(page, { hospitalName, hospitalNumber, dob }) {
+export async function lookUpFirstHospital(page, { hospitalName, hospitalNumber, name, dob }) {
   await field(page, 'First hospital').locator('select').selectOption({ label: hospitalName });
   await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-  await field(page, 'Date of birth').locator('input').fill(dob);
+  await field(page, 'Name at the hospital').locator('input').fill(name);
+  if (dob) await fieldStarting(page, 'Date of birth').locator('input').fill(dob);
   await page.getByRole('button', { name: 'Find my record' }).click();
 }
 
 /** My Health ID: full first-hospital confirmation; returns the new DID. */
 export async function createHealthId(page, { hospitalName, hospitalNumber, dob, name }) {
-  await lookUpFirstHospital(page, { hospitalName, hospitalNumber, dob });
+  await lookUpFirstHospital(page, { hospitalName, hospitalNumber, name, dob });
   await expect(page.getByText(`Is this you: ${name}?`)).toBeVisible();
   await page.getByRole('button', { name: 'Yes, create my Health ID' }).click();
   const didRow = page.locator('.data-row').filter({ hasText: 'Health ID (DID)' }).locator('.v');
@@ -169,11 +175,12 @@ export async function createHealthId(page, { hospitalName, hospitalNumber, dob, 
 }
 
 /** My Hospitals: pick a hospital from the search and look up a record there. */
-export async function lookUpFacility(page, { search, hospitalName, hospitalNumber, dob }) {
+export async function lookUpFacility(page, { search, hospitalName, hospitalNumber, name, dob }) {
   await field(page, 'Search by hospital name').locator('input').fill(search);
   await page.getByText(hospitalName, { exact: true }).click();
   await field(page, 'Your hospital number').locator('input').fill(hospitalNumber);
-  await field(page, 'Date of birth (for verification)').locator('input').fill(dob);
+  await field(page, 'Your name at this hospital').locator('input').fill(name);
+  if (dob) await fieldStarting(page, 'Date of birth').locator('input').fill(dob);
   await page.getByRole('button', { name: 'Verify & Add to Network' }).click();
 }
 

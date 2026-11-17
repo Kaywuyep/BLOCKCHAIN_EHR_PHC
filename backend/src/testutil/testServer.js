@@ -32,8 +32,10 @@ const { HospitalRegistry } = require('../services/hospitalRegistry');
 const { ReferenceService } = require('../services/referenceService');
 const { UserDirectory } = require('../services/userDirectory');
 const { Hl7ListenerManager } = require('../services/hl7ListenerManager');
+const { AccountStore } = require('../services/accountStore');
+const { Onboarding } = require('../services/onboarding');
 
-async function createTestServer({ authMode = 'off', env = {}, withInbox = true } = {}) {
+async function createTestServer({ authMode = 'off', env = {}, withInbox = true, fetchStaff } = {}) {
   const config = loadConfig({
     AUTH_MODE: authMode,
     AUTH_JWT_SECRET: 'test-secret-test-secret-test-secret-1234',
@@ -58,8 +60,12 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     : null;
 
   const hospitalRegistry = new HospitalRegistry({ db, cipher });
-  hospitalRegistry.importLegacyConfig();
+  if (authMode !== 'password') hospitalRegistry.importLegacyConfig();
   const userDirectory = new UserDirectory({ db });
+  const accounts = authMode === 'password' ? new AccountStore({ db }) : null;
+  const onboarding = accounts
+    ? new Onboarding({ accounts, users: userDirectory, hospitals: hospitalRegistry, providers: providerRegistry, ledgerPromise, logger, ...(fetchStaff ? { fetchStaff } : {}) })
+    : null;
   // FR3: on-chain pointers registered at the point of care.
   const referenceService = new ReferenceService({ ledgerPromise, fhirAdapter, logger }).attach();
   const listenerManager = new Hl7ListenerManager({ registry: hospitalRegistry, inbox, mllpEnabled: false, logger });
@@ -81,6 +87,8 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
     listenerManager,
     referenceService,
     cipher,
+    accounts,
+    onboarding,
   });
 
   const server = http.createServer(app);
@@ -112,7 +120,7 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
         headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(payload),
       });
-    await post('/patients/register/lookup', { hospitalID, hospitalNumber, dateOfBirth: dob });
+    await post('/patients/register/lookup', { hospitalID, hospitalNumber, name, dateOfBirth: dob });
     return post('/patients/register', { ...body, firstFacility: { hospitalID, hospitalNumber } });
   }
 
@@ -127,6 +135,8 @@ async function createTestServer({ authMode = 'off', env = {}, withInbox = true }
 
   return {
     baseUrl,
+    accounts,
+    onboarding,
     close,
     login,
     registerPatient,

@@ -7,9 +7,16 @@
  * (NIN deterministic match + weighted demographic scoring + a manual
  * "possible duplicate" review queue) with a simpler, patient-asserted
  * linkage flow: the patient already knows which hospital they have a
- * record at, so they assert their hospital number and date of birth for
- * that hospital, and the system either confirms it or doesn't. There is
- * no fuzzy scoring and nothing is ever auto-merged.
+ * record at, so they assert their hospital number and their name as
+ * registered at that hospital (date of birth optional), and the system
+ * either confirms it or doesn't. There is no fuzzy scoring and nothing is
+ * ever auto-merged.
+ *
+ * Name match: every name the patient types must be on the record, and at
+ * least two of them (or the record's only name), in any order, ignoring
+ * case, punctuation and a missing middle name. "Amina Yusuf" matches the
+ * record "YUSUF, Amina Bello". Date of birth is checked only when both the
+ * patient and the record have one; many hospital records have none.
  *
  * This never writes to the ledger, and it never invents a new data store
  * for hospital demographics -- it looks records up via fhirAdapter's own
@@ -48,6 +55,12 @@ class LinkageService {
     return (value || '').toString().trim().toLowerCase();
   }
 
+  /** True when this caller has used up their lookups for now (does not count as an attempt). */
+  isRateLimited(patientDID) {
+    const entry = this.lookupAttempts.get(patientDID);
+    return Boolean(entry && Date.now() - entry.windowStart <= this.attemptWindowMs && entry.count >= this.maxAttempts);
+  }
+
   _checkRateLimit(patientDID) {
     const now = Date.now();
     const entry = this.lookupAttempts.get(patientDID);
@@ -61,24 +74,52 @@ class LinkageService {
     }
   }
 
+  /** Name words, lower-case, without punctuation or titles. */
+  static nameTokens(name) {
+    const TITLES = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'master', 'alhaji', 'alhaja', 'hajiya', 'mallam', 'malam', 'chief', 'prof', 'rev']);
+    return String(name || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s'-]/g, ' ')
+      .replace(/['-]/g, '')
+      .split(/\s+/)
+      .filter((t) => t && !TITLES.has(t));
+  }
+
+  static namesMatch(given, recordName) {
+    const typed = [...new Set(LinkageService.nameTokens(given))];
+    const record = new Set(LinkageService.nameTokens(recordName));
+    if (!typed.length || !record.size) return false;
+    if (typed.length < Math.min(2, record.size)) return false;
+    return typed.every((t) => record.has(t));
+  }
+
   /**
-   * Step 1: the patient asserts a hospital number and date of birth for a
-   * given hospital. Whether the hospital number doesn't exist at all, or
-   * exists but the date of birth doesn't match, this throws the exact
-   * same generic error -- distinguishing the two would let a caller
-   * enumerate valid hospital numbers and harvest the names behind them.
-   * On a match, it returns the record's name for the patient to confirm,
-   * but does not link anything yet.
+   * Step 1: the patient asserts a hospital number and their name as
+   * registered there (and, optionally, date of birth). Whether the hospital
+   * number doesn't exist, or exists but the name or date of birth doesn't
+   * match, this throws the exact same generic error -- distinguishing them
+   * would let a caller enumerate valid hospital numbers. On a match, it
+   * returns the record's name for the patient to confirm, but does not
+   * link anything yet.
+   *
+   * `details` is { name, dateOfBirth }; dateOfBirth may be omitted.
    */
-  linkFacility(patientDID, hospitalID, hospitalNumber, dateOfBirth) {
-    if (!patientDID || !hospitalID || !hospitalNumber || !dateOfBirth) {
-      throw new Error('patientDID, hospitalID, hospitalNumber and dateOfBirth are all required');
+  linkFacility(patientDID, hospitalID, hospitalNumber, details = {}) {
+    const { name, dateOfBirth } = details || {};
+    if (!patientDID || !hospitalID || !hospitalNumber || !String(name || '').trim()) {
+      throw new Error('hospital, hospital number and name are all required');
     }
 
     this._checkRateLimit(patientDID);
 
     const record = this.fhirAdapter.findLocalPatientRecord(hospitalID, hospitalNumber);
-    const matches = Boolean(record) && LinkageService.normalize(record.dob) === LinkageService.normalize(dateOfBirth);
+    const dobChecked = Boolean(record && record.dob && dateOfBirth);
+    const matches =
+      Boolean(record) &&
+      LinkageService.namesMatch(name, record.name) &&
+      (!dobChecked || LinkageService.normalize(record.dob) === LinkageService.normalize(dateOfBirth));
     if (!matches) {
       throw new Error('No matching record found');
     }

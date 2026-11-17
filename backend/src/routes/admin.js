@@ -7,12 +7,15 @@ const {
   HL7_VERSIONS,
   FHIR_AUTH_TYPES,
   DEFAULT_FHIR_SCOPE,
+  SMARTCLINIC_DEFAULTS,
+  SMARTCLINIC_FIELDS,
   slugify,
 } = require('../services/hospitalRegistry');
 const { DEFAULT_FIELD_MAP, parseHl7Message, mapAdtMessageToResources, resolveFieldMap } = require('../services/hl7AdtListener');
 const { getHospitalStatus } = require('../services/hospitalStatus');
 const fixtures = require('../services/hl7AdtListener.fixtures');
 const { request } = require('../services/liveFhirClient');
+const smartClinic = require('../services/smartClinicClient');
 
 /**
  * admin.js — System Admin only.
@@ -55,7 +58,7 @@ function describeFetchError(err) {
   return code ? `${err.message} (${code})` : err.message;
 }
 
-function adminRouter({ registry, users, listenerManager }) {
+function adminRouter({ registry, users, listenerManager, onboarding = null, accounts = null }) {
   const router = express.Router();
   router.use(requireRole(ROLES.SYSTEM_ADMIN));
 
@@ -84,6 +87,8 @@ function adminRouter({ registry, users, listenerManager }) {
       fhirAuthTypes: FHIR_AUTH_TYPES,
       defaultFhirScope: DEFAULT_FHIR_SCOPE,
       defaultFieldMap: DEFAULT_FIELD_MAP,
+      smartclinicDefaults: SMARTCLINIC_DEFAULTS,
+      smartclinicFields: SMARTCLINIC_FIELDS,
       nextMllpPort: nextPort,
       mllpEnabledOnServer: listenerManager.mllpEnabled,
       sampleAdtMessage: fixtures.adtA01Admit.replace(/\r/g, '\n'),
@@ -106,6 +111,17 @@ function adminRouter({ registry, users, listenerManager }) {
   router.post('/hospitals', async (req, res) => {
     const body = req.body || {};
     const createdBy = actorID(req.user, 'system-admin');
+    if (onboarding) {
+      // Password accounts: the hospital and its admin account (admin@<id>,
+      // temporary password shown once) are both recorded on the ledger.
+      try {
+        const { hospital, adminAccount } = await onboarding.createHospital(body, { createdBy });
+        await listenerManager.sync(hospital.hospitalID);
+        return res.status(201).json({ ...withRuntime(registry.get(hospital.hospitalID)), adminAccount });
+      } catch (err) {
+        return sendError(res, err);
+      }
+    }
     try {
       if (body.adminUser && body.adminUser.subject) {
         // Validate the admin account before creating anything.
@@ -162,6 +178,38 @@ function adminRouter({ registry, users, listenerManager }) {
    * endpoint for an access token. A blank secret with a hospitalID uses
    * the stored one.
    */
+  // SmartClinic (Primed E-Health): sign in, then look up one hospital
+  // number and one staff ID, and suggest the field mapping. A blank password
+  // uses the one stored for hospitalID.
+  router.post('/hospitals/test-smartclinic', async (req, res) => {
+    const { hospitalID, hospitalNumber, staffID, ...settings } = req.body || {};
+    try {
+      const stored = hospitalID ? registry.getInternal(hospitalID) : null;
+      const password = settings.password || (stored && stored._emrSecret) || '';
+      if (!settings.baseUrl || !settings.username || !password) {
+        return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'API URL, username and password are required' }] });
+      }
+      const base = String(settings.baseUrl).trim();
+      const hospital = {
+        hospitalID: `test:${hospitalID || base}`,
+        integration: 'smartclinic',
+        smartclinic: {
+          ...SMARTCLINIC_DEFAULTS,
+          ...Object.fromEntries(Object.entries(settings).filter(([, v]) => v !== '' && v != null)),
+          baseUrl: base.endsWith('/') ? base : `${base}/`,
+          fieldMap: Object.fromEntries(Object.entries(settings.fieldMap || {}).filter(([, v]) => v)),
+          password,
+        },
+      };
+      res.json(await smartClinic.testConnection(hospital, {
+        hospitalNumber: String(hospitalNumber || '').trim() || undefined,
+        staffID: String(staffID || '').trim() || undefined,
+      }));
+    } catch (err) {
+      res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: err.message }] });
+    }
+  });
+
   router.post('/hospitals/test-fhir', async (req, res) => {
     const { baseUrl, authType = 'client-secret', tokenUrl, clientId, scope, hospitalID } = req.body || {};
     let { clientSecret } = req.body || {};
@@ -302,16 +350,54 @@ function adminRouter({ registry, users, listenerManager }) {
 
   router.get('/users', (req, res) => {
     const names = new Map(registry.list().map((h) => [h.hospitalID, h.name]));
-    res.json(users.list().map((u) => ({ ...u, hospitalName: u.hospitalID ? names.get(u.hospitalID) || null : null })));
+    res.json(
+      users.list().map((u) => ({
+        ...u,
+        hospitalName: u.hospitalID ? names.get(u.hospitalID) || null : null,
+        ...(accounts ? { login: accounts.loginFor(u.subject), hasPassword: accounts.hasCredentials(u.subject) } : {}),
+      }))
+    );
   });
 
-  router.post('/users', (req, res) => {
+  router.post('/users', async (req, res) => {
     try {
       const body = req.body || {};
       if (body.hospitalID && !registry.get(body.hospitalID)) {
         return res.status(400).json({ error: `unknown hospital "${body.hospitalID}"` });
       }
+      if (onboarding) {
+        // Validate first, record on the ledger, then save and issue a temporary password.
+        const createdBy = actorID(req.user, 'system-admin');
+        const subject = String(body.subject || '').trim();
+        if (users.getAccount(subject) || accounts.loginTaken(subject)) {
+          return res.status(409).json({ error: `a user with ID "${subject}" already exists` });
+        }
+        const roles = Array.isArray(body.roles) ? body.roles : String(body.roles || '').split(',');
+        if (roles.map((r) => r.trim()).includes(ROLES.CLINICIAN)) {
+          return res.status(400).json({ error: "clinicians are added by their hospital admin, from the hospital's EMR" });
+        }
+        users._validate({ ...body, subject });
+        await onboarding.onChain('ACCOUNT_CREATED', { actorID: subject, hospitalID: body.hospitalID || '', detail: { roles, by: createdBy } });
+        const user = users.create(body, { createdBy });
+        const account = accounts.issueTemporary(user.subject, user.subject);
+        return res.status(201).json({ ...user, account });
+      }
       res.status(201).json(users.create(body, { createdBy: actorID(req.user, 'system-admin') }));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // Password accounts: a new temporary password, which must be changed at next sign-in.
+  router.post('/users/:subject/reset-password', (req, res) => {
+    if (!accounts) return res.status(404).json({ error: 'passwords are managed by the identity provider' });
+    try {
+      const user = users.getAccount(req.params.subject);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (user.roles.includes(ROLES.PATIENT) && !accounts.hasCredentials(user.subject)) {
+        return res.status(400).json({ error: 'this patient has no password account' });
+      }
+      res.json(accounts.issueTemporary(user.subject, accounts.loginFor(user.subject) || user.subject));
     } catch (err) {
       sendError(res, err);
     }

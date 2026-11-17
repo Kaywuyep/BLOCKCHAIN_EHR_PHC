@@ -3,6 +3,7 @@
 const express = require('express');
 const { ROLES, hasRole, isSystemAdmin, deny, actorID } = require('../auth/policy');
 const { EmergencyDetails } = require('../services/emergencyDetails');
+const { staffLogin } = require('../services/onboarding');
 
 /**
  * hospitalAdmin.js — the Hospital Admin view (Chapter 3, NFR9, Table 3.7).
@@ -24,7 +25,7 @@ const { EmergencyDetails } = require('../services/emergencyDetails');
 
 const ACCESS_EVENTS = new Set(['RECORD_ACCESSED', 'BREAK_GLASS_ACCESS']);
 
-function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry = null, db = null, cipher = null }) {
+function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry = null, db = null, cipher = null, onboarding = null, accounts = null }) {
   const router = express.Router();
   const emergency = db && cipher ? new EmergencyDetails({ db, cipher }) : null;
 
@@ -103,6 +104,12 @@ function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hos
         hospitalID: h,
         hospitalName: hospital ? hospital.name : h,
         integration: hospital ? hospital.integration : null,
+        emrConnected: Boolean(
+          hospital &&
+            ((hospital.integration === 'smartclinic' && hospital.smartclinic) ||
+              (hospital.fhir && hospital.fhir.baseUrl && ['fhir', 'both'].includes(hospital.integration)))
+        ),
+        passwordAccounts: Boolean(onboarding),
         linkedPatients: fhirAdapter.listLinks(h).length,
         rosterSize: fhirAdapter.listLocalPatientRecords(h).length,
         clinicians: providers.filter((p) => p.status === 'ACTIVE').length,
@@ -187,6 +194,7 @@ function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hos
             patientsAccessed: new Set(mine.map((e) => e.patientDID)).size,
             lastAccessAt: mine.length ? mine.map((e) => e.timestamp).sort().at(-1) : null,
             activeGrants: grants.filter((g) => g.providerID === p.providerID && g.status === 'ACTIVE').length,
+            ...(accounts ? { login: accounts.loginFor(staffLogin(p.providerID, h)) } : {}),
           };
         })
       );
@@ -194,6 +202,82 @@ function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hos
       res.status(400).json({ error: err.message });
     }
   });
+
+  function sendError(res, err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+
+  if (onboarding) {
+    const by = (req) => actorID(req.user, 'hospital-admin');
+
+    // Search the EMR by staff ID or name (nothing is saved).
+    router.post('/clinicians/emr-search', async (req, res) => {
+      try {
+        res.json(await onboarding.searchEmr(req.hospitalID, (req.body || {}).query));
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+
+    // Look a staff ID up in the hospital's EMR (nothing is saved).
+    router.post('/clinicians/emr-lookup', async (req, res) => {
+      try {
+        const staff = await onboarding.previewFromEmr(req.hospitalID, (req.body || {}).staffID, { hint: (req.body || {}).hint });
+        const existing = providerRegistry.get(staff.staffID, req.hospitalID);
+        res.json({ ...staff, alreadyRegistered: Boolean(existing) });
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+
+    // Add a clinician from the EMR and create their login (temporary password, shown once).
+    router.post('/clinicians/from-emr', async (req, res) => {
+      try {
+        res.status(201).json(await onboarding.enrollFromEmr(req.hospitalID, (req.body || {}).staffID, { createdBy: by(req), hint: (req.body || {}).hint }));
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+
+    router.post('/clinicians/:providerID/resync', async (req, res) => {
+      try {
+        res.json(await onboarding.resyncFromEmr(req.hospitalID, req.params.providerID, { by: by(req) }));
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+
+    router.post('/clinicians/:providerID/reset-password', (req, res) => {
+      try {
+        const subject = staffLogin(req.params.providerID, req.hospitalID);
+        if (!accounts.hasCredentials(subject)) return res.status(404).json({ error: 'this clinician has no login account' });
+        res.json(accounts.issueTemporary(subject, subject));
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+
+    // New clinician typed in by hand (hospitals without an EMR connection),
+    // or a status / detail change for an existing one.
+    router.post('/clinicians', async (req, res) => {
+      try {
+        const body = req.body || {};
+        const existing = providerRegistry.get(String(body.providerID || ''), req.hospitalID);
+        if (!existing) {
+          return res.status(201).json(await onboarding.enrollManually(req.hospitalID, body, { createdBy: by(req) }));
+        }
+        let provider = existing;
+        if (existing.source !== 'emr') {
+          // Manually added: the hospital admin owns these details.
+          provider = providerRegistry.register({ ...existing, name: body.name || existing.name, role: body.role || existing.role, department: body.department || existing.department });
+        }
+        if (body.status) provider = await onboarding.setClinicianStatus(req.hospitalID, existing.providerID, body.status, { by: by(req) });
+        res.json(provider);
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
+  }
 
   router.post('/clinicians', (req, res) => {
     try {

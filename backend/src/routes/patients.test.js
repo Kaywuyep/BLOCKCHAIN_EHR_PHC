@@ -139,7 +139,7 @@ test('POST /:hospitalID/local-records adds a roster entry a later link-facility 
     const lookup = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-90210', dateOfBirth: '1975-03-02' }),
+      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-90210', name: 'Real Patient', dateOfBirth: '1975-03-02' }),
     });
     assert.equal(lookup.status, 200);
     const lookupBody = await lookup.json();
@@ -178,7 +178,7 @@ test('POST /:did/link-facility returns the matched name without linking anything
     const res = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', dateOfBirth: '1990-04-12' }),
+      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', name: 'Adaeze Okafor', dateOfBirth: '1990-04-12' }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
@@ -200,12 +200,12 @@ test('POST /:did/link-facility returns the same generic error for a wrong hospit
     const wrongNumber = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'NOPE-00000', dateOfBirth: '1990-04-12' }),
+      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'NOPE-00000', name: 'Adaeze Okafor', dateOfBirth: '1990-04-12' }),
     });
     const wrongDob = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', dateOfBirth: '2000-01-01' }),
+      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', name: 'Adaeze Okafor', dateOfBirth: '2000-01-01' }),
     });
 
     assert.equal(wrongNumber.status, 404);
@@ -234,7 +234,7 @@ test('POST /:did/confirm-link only succeeds after a matching link-facility looku
     await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', dateOfBirth: '1990-04-12' }),
+      body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'IBD-77410', name: 'Adaeze Okafor', dateOfBirth: '1990-04-12' }),
     });
 
     const confirmed = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/confirm-link`, {
@@ -261,7 +261,7 @@ test('POST /:did/link-facility rate-limits repeated lookups for the same patient
       last = await fetch(`${server.baseUrl}/api/patients/did:patientchain:p1/link-facility`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'GUESS', dateOfBirth: '1990-01-01' }),
+        body: JSON.stringify({ hospitalID: 'HospitalB-Ibadan', hospitalNumber: 'GUESS', name: 'Adaeze Okafor', dateOfBirth: '1990-01-01' }),
       });
     }
     assert.equal(last.status, 429);

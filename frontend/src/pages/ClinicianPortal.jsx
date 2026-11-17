@@ -7,6 +7,7 @@ import { useLedgerEvents } from '../ledgerEvents';
 import './viewRecords.css';
 import '../components/emergencyCode.css';
 import { useScreenCaptureSubject } from '../components/screenCaptureAudit';
+import { ClinicianOverview } from './ClinicianOverview';
 
 // Record-type categories a clinician can ask for (Table 3.6). The grant
 // stores the FHIR resource types; the gateway returns nothing else.
@@ -53,7 +54,8 @@ export function ClinicianPortal() {
 
   return (
     <Routes>
-      <Route index element={<RequestRecords hospitalID={hospitalID} hospitalName={hospitalName} providerID={providerID} profile={profile} nameOf={nameOf} />} />
+      <Route index element={<ClinicianOverview profile={profile} hospitalName={hospitalName} />} />
+      <Route path="request" element={<RequestRecords hospitalID={hospitalID} hospitalName={hospitalName} providerID={providerID} profile={profile} nameOf={nameOf} />} />
       <Route path="emergency" element={<EmergencyAccess hospitalID={hospitalID} hospitalName={hospitalName} hospitals={hospitals} nameOf={nameOf} />} />
       <Route path="records" element={<MyGrants hospitalName={hospitalName} />} />
     </Routes>

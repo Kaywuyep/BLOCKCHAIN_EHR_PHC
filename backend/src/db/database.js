@@ -250,6 +250,30 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+  // Password accounts (AUTH_MODE=password). One row per user in `users`.
+  // login is the email (patients) or username (staff), lower-cased; it is
+  // an identifier, kept in the clear for lookup like other IDs here.
+  // password_hash is scrypt with a per-user salt. must_change marks a
+  // temporary password set by an admin.
+  `
+  CREATE TABLE credentials (
+    subject              TEXT PRIMARY KEY,
+    login                TEXT NOT NULL UNIQUE,
+    password_hash        TEXT NOT NULL,
+    must_change          INTEGER NOT NULL DEFAULT 0,
+    failed_attempts      INTEGER NOT NULL DEFAULT 0,
+    locked_until         TEXT,
+    password_changed_at  TEXT NOT NULL,
+    created_at           TEXT NOT NULL
+  );
+  `,
+  // Hospitals whose EMR has its own (non-FHIR) API, e.g. SmartClinic by
+  // Primed E-Health: connection settings and field mapping (emr_json) and
+  // the API account's password, encrypted (emr_secret_enc).
+  `
+  ALTER TABLE hospitals ADD COLUMN emr_json TEXT;
+  ALTER TABLE hospitals ADD COLUMN emr_secret_enc TEXT;
+  `,
 ];
 
 function migrate(db) {

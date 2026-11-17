@@ -35,13 +35,15 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
   const { did } = await patientWithNetwork(patientSubject, dob, [
     { hospitalID: H.langtang.id, hospitalNumber: lagNumber },
     { hospitalID: H.wase.id, hospitalNumber: wasNumber },
-  ]);
+  ], name);
 
   const clinicianPage = await (await browser.newContext()).newPage();
 
   await test.step('the clinician must name the other hospital, the patient\'s number there and a reason', async () => {
     await signIn(clinicianPage, { role: 'clinician', subject: providerID, hospitalID: H.langtang.id });
     await gotoNav(clinicianPage, 'Emergency Access');
+    // The form opens on the emergency-code tab; this test uses a hospital number.
+    await clinicianPage.getByRole('tab', { name: 'Hospital number' }).click();
     const hospitalSelect = field(clinicianPage, 'Hospital holding the records').locator('select');
     // Break-glass is only for records at OTHER hospitals.
     await expect(hospitalSelect.locator('option', { hasText: H.wase.name })).toHaveCount(1);

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { useSession } from '../auth';
+import { TemporaryPassword } from '../components/TemporaryPassword';
+import { SmartClinicConfig } from '../components/SmartClinicConfig';
 import './admin.css';
 
 /**
@@ -28,6 +31,11 @@ const INTEGRATION_CHOICES = [
     body: 'ADT feed keeps the patient roster current; FHIR API supplies clinical records on request.',
   },
   {
+    key: 'smartclinic',
+    title: 'SmartClinic (Primed E-Health)',
+    body: 'The hospital runs SmartClinic, which has its own API instead of FHIR or HL7. Cevruni signs in with an account the hospital creates, to check patients’ hospital numbers and add clinicians by staff ID.',
+  },
+  {
     key: 'rest',
     title: 'Custom REST push',
     body: 'Neither FHIR nor HL7: the vendor, or a small export job at the hospital, sends records to Cevruni’s REST endpoint as FHIR R4 JSON.',
@@ -51,7 +59,7 @@ const FIELD_LABELS = {
   dischargeDateTime: 'Discharge date/time',
 };
 
-const INTEGRATION_LABEL = { hl7: 'HL7 ADT', fhir: 'FHIR API', both: 'HL7 ADT + FHIR', rest: 'Custom REST', manual: 'Manual roster' };
+const INTEGRATION_LABEL = { hl7: 'HL7 ADT', fhir: 'FHIR API', both: 'HL7 ADT + FHIR', smartclinic: 'SmartClinic API', rest: 'Custom REST', manual: 'Manual roster' };
 
 function emptyForm(options) {
   return {
@@ -67,6 +75,7 @@ function emptyForm(options) {
       clientId: '',
       clientSecret: '',
       mrnIdentifierSystem: '',
+      staffIdentifierSystem: '',
       scope: options?.defaultFhirScope || '',
       clientCertPath: '',
       clientKeyPath: '',
@@ -81,6 +90,7 @@ function emptyForm(options) {
       bindAddress: '',
       fieldMap: {},
     },
+    smartclinic: { baseUrl: '', username: '', password: '', loginPath: '', patientSearchPath: '', staffSearchPath: '', fieldMap: {} },
     adminUser: { subject: '', displayName: '' },
   };
 }
@@ -98,10 +108,11 @@ function fromHospital(h, options) {
     hl7: h.hl7
       ? { ...base.hl7, ...h.hl7, mllpPort: h.hl7.mllpPort || base.hl7.mllpPort, allowedIps: (h.hl7.allowedIps || []).join(', ') }
       : base.hl7,
+    smartclinic: h.smartclinic ? { ...base.smartclinic, ...h.smartclinic, password: '', fieldMap: h.smartclinic.fieldMap || {} } : base.smartclinic,
   };
 }
 
-function toPayload(form, { editing }) {
+function toPayload(form, { editing, passwordAccounts }) {
   const usesFhir = form.integration === 'fhir' || form.integration === 'both';
   const usesHl7 = form.integration === 'hl7' || form.integration === 'both';
   const payload = {
@@ -110,13 +121,15 @@ function toPayload(form, { editing }) {
     type: form.type,
     integration: form.integration,
     fhir: usesFhir ? form.fhir : null,
+    smartclinic: form.integration === 'smartclinic' ? form.smartclinic : null,
     hl7: usesHl7
       ? { ...form.hl7, mllpPort: Number(form.hl7.mllpPort), allowedIps: form.hl7.allowedIps.split(/[\s,]+/).filter(Boolean) }
       : null,
   };
   if (!editing) {
     payload.hospitalID = form.hospitalID.trim() || undefined;
-    if (form.adminUser.subject.trim()) payload.adminUser = form.adminUser;
+    if (passwordAccounts) payload.adminUser = { displayName: form.adminUser.displayName.trim() };
+    else if (form.adminUser.subject.trim()) payload.adminUser = form.adminUser;
   }
   return payload;
 }
@@ -151,6 +164,8 @@ function TestResult({ result }) {
 }
 
 export function HospitalSetup() {
+  const { authMode } = useSession();
+  const passwordAccounts = authMode === 'password';
   const [options, setOptions] = useState(null);
   const [hospitals, setHospitals] = useState([]);
   const [error, setError] = useState(null);
@@ -240,6 +255,11 @@ export function HospitalSetup() {
         }
         if (!form.fhir.mrnIdentifierSystem) return 'Enter the MRN identifier system.';
       }
+      if (form.integration === 'smartclinic') {
+        if (!/^https?:\/\//.test(form.smartclinic.baseUrl)) return 'Enter the SmartClinic API address (starts with http:// or https://).';
+        if (!form.smartclinic.username) return 'Enter the SmartClinic username.';
+        if (!form.smartclinic.password && !(editing && form.smartclinic.hasPassword)) return 'Enter the SmartClinic password.';
+      }
       if (usesHl7) {
         if (!form.hl7.mllpEnabled && !form.hl7.httpEnabled) return 'Turn on at least one way to receive HL7 messages.';
         if (form.hl7.mllpEnabled && !(Number(form.hl7.mllpPort) >= 1024 && Number(form.hl7.mllpPort) <= 65535)) {
@@ -276,10 +296,11 @@ export function HospitalSetup() {
     setSaving(true);
     setError(null);
     try {
-      const payload = toPayload(form, { editing });
+      const payload = toPayload(form, { editing, passwordAccounts });
       const saved = editing ? await api.adminUpdateHospital(editingID, payload) : await api.adminCreateHospital(payload);
       let msg = editing ? `${saved.name} updated.` : `${saved.name} is set up.`;
       if (saved.adminUser) msg += ` Hospital admin “${saved.adminUser.subject}” can now sign in.`;
+      if (saved.adminAccount) msg += ' Its hospital admin account is ready. Give them these sign-in details:';
       if (saved.adminUserError) msg += ` The admin account was not created: ${saved.adminUserError}`;
       setNotice({ text: msg, hospital: saved });
       setMode('list');
@@ -308,6 +329,7 @@ export function HospitalSetup() {
         {notice && (
           <div className="notice-banner">
             {notice.text}
+            {notice.hospital?.adminAccount && <TemporaryPassword account={notice.hospital.adminAccount} who="The hospital admin" />}
             {notice.hospital && <ConnectionInstructions hospital={notice.hospital} options={options} />}
           </div>
         )}
@@ -622,6 +644,11 @@ export function HospitalSetup() {
                     <input value={form.fhir.mrnIdentifierSystem} placeholder="https://emr.hospital.ng/identifiers/mrn" onChange={(e) => setFhir({ mrnIdentifierSystem: e.target.value.trim() })} />
                     <span className="field-help">The <code>Patient.identifier.system</code> this hospital uses for its hospital number. Ask for a sample Patient resource.</span>
                   </div>
+                  <div className="field span-2">
+                    <label>Staff ID identifier system <span className="optional">optional</span></label>
+                    <input value={form.fhir.staffIdentifierSystem || ''} placeholder="https://emr.hospital.ng/identifiers/staff" onChange={(e) => setFhir({ staffIdentifierSystem: e.target.value.trim() })} />
+                    <span className="field-help">The <code>Practitioner.identifier.system</code> for staff IDs, used when the hospital admin adds clinicians from the EMR. Blank matches the ID in any system.</span>
+                  </div>
                   <div className="field">
                     <label>Client certificate <span className="optional">mutual TLS</span></label>
                     <input value={form.fhir.clientCertPath || ''} placeholder="/etc/cevruni/hospital-x/client.crt" onChange={(e) => setFhir({ clientCertPath: e.target.value.trim() })} />
@@ -646,6 +673,16 @@ export function HospitalSetup() {
                 </button>
                 <TestResult result={fhirTest} />
               </fieldset>
+            )}
+
+            {form.integration === 'smartclinic' && (
+              <SmartClinicConfig
+                value={form.smartclinic}
+                onChange={(patch) => setForm((f) => ({ ...f, smartclinic: { ...f.smartclinic, ...patch } }))}
+                defaults={options?.smartclinicDefaults}
+                editingID={editingID}
+                hasPassword={Boolean(editing && form.smartclinic.hasPassword)}
+              />
             )}
 
             {form.integration === 'rest' && (
@@ -677,25 +714,43 @@ export function HospitalSetup() {
         {/* Step 3: first hospital admin (create only) */}
         {!editing && step === 2 && (
           <div className="wizard-body">
-            <p className="hint">
-              Create the hospital’s first admin. They review break-glass access, manage the roster and register clinicians for this
-              hospital. You can skip this and add one later under <strong>Users</strong>.
-            </p>
-            <div className="form-grid">
-              <div className="field">
-                <label>Admin user ID</label>
-                <input
-                  value={form.adminUser.subject}
-                  placeholder={`admin-${form.hospitalID.split('-').slice(-1)[0] || 'hospital'}`}
-                  onChange={(e) => set({ adminUser: { ...form.adminUser, subject: e.target.value.trim() } })}
-                />
-                <span className="field-help">Must match their sign-in name at the identity provider.</span>
-              </div>
-              <div className="field">
-                <label>Full name <span className="optional">optional</span></label>
-                <input value={form.adminUser.displayName} onChange={(e) => set({ adminUser: { ...form.adminUser, displayName: e.target.value } })} />
-              </div>
-            </div>
+            {passwordAccounts ? (
+              <>
+                <p className="hint">
+                  The hospital’s admin account is created with the hospital. Its username is{' '}
+                  <code>admin@{form.hospitalID || slugify(form.name) || 'hospital-id'}</code>, and you will see a temporary password once,
+                  after saving. They must change it the first time they sign in. They then add their clinicians from the hospital’s EMR.
+                </p>
+                <div className="form-grid">
+                  <div className="field">
+                    <label>Admin’s full name <span className="optional">optional</span></label>
+                    <input value={form.adminUser.displayName} onChange={(e) => set({ adminUser: { ...form.adminUser, displayName: e.target.value } })} />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  Create the hospital’s first admin. They review break-glass access, manage the roster and register clinicians for this
+                  hospital. You can skip this and add one later under <strong>Users</strong>.
+                </p>
+                <div className="form-grid">
+                  <div className="field">
+                    <label>Admin user ID</label>
+                    <input
+                      value={form.adminUser.subject}
+                      placeholder={`admin-${form.hospitalID.split('-').slice(-1)[0] || 'hospital'}`}
+                      onChange={(e) => set({ adminUser: { ...form.adminUser, subject: e.target.value.trim() } })}
+                    />
+                    <span className="field-help">Must match their sign-in name at the identity provider.</span>
+                  </div>
+                  <div className="field">
+                    <label>Full name <span className="optional">optional</span></label>
+                    <input value={form.adminUser.displayName} onChange={(e) => set({ adminUser: { ...form.adminUser, displayName: e.target.value } })} />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -722,10 +777,16 @@ export function HospitalSetup() {
                   <span className="v">{form.fhir.baseUrl}{fhirTest ? (fhirTest.ok ? ' · tested ✓' : ' · test failed') : ' · not tested'}</span>
                 </div>
               )}
+              {form.integration === 'smartclinic' && (
+                <div className="data-row">
+                  <span className="k">SmartClinic</span>
+                  <span className="v">{form.smartclinic.baseUrl} as “{form.smartclinic.username}”</span>
+                </div>
+              )}
               {!editing && (
                 <div className="data-row">
                   <span className="k">Hospital admin</span>
-                  <span className="v">{form.adminUser.subject || 'none (add later)'}</span>
+                  <span className="v">{passwordAccounts ? `admin@${form.hospitalID || slugify(form.name)} (temporary password shown after saving)` : form.adminUser.subject || 'none (add later)'}</span>
                 </div>
               )}
             </div>
@@ -764,6 +825,7 @@ function ConnectionInstructions({ hospital }) {
   if (hospital.integration === 'rest') {
     lines.push(`Custom REST: POST ${window.location.origin}/api/ingest/${hospital.hospitalID} (JSON: hospitalNumber, patient, resources[] as FHIR R4; bearer token with role hl7_interface)`);
   }
+  if (hospital.smartclinic) lines.push(`SmartClinic: Cevruni will sign in to ${hospital.smartclinic.baseUrl} as “${hospital.smartclinic.username}”`);
   if (hospital.fhir) lines.push(`FHIR: Cevruni will call ${hospital.fhir.baseUrl} as client “${hospital.fhir.clientId || '—'}”`);
   if (!lines.length) return null;
   return (

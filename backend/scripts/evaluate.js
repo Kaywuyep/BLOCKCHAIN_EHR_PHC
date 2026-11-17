@@ -231,6 +231,7 @@ async function phaseCrossFacility(patients) {
     const look = await api('POST', `/api/patients/${encodeURIComponent(p.did)}/link-facility`, {
       hospitalID: 'hospital-b',
       hospitalNumber: p.numbers['hospital-b'],
+      name: `${p.given} ${p.family}`,
       dateOfBirth: p.dobIso,
     });
     timings.linkLookup.push(look.ms);
@@ -340,11 +341,13 @@ async function phaseCrossFacility(patients) {
     const wrongDob = await api('POST', `/api/patients/${encodeURIComponent(other.did)}/link-facility`, {
       hospitalID: 'hospital-b',
       hospitalNumber: other.numbers['hospital-b'],
+      name: `${other.given} ${other.family}`,
       dateOfBirth: '1901-01-01',
     });
     const wrongNum = await api('POST', `/api/patients/${encodeURIComponent(other.did)}/link-facility`, {
       hospitalID: 'hospital-b',
       hospitalNumber: 'HB-DOES-NOT-EXIST',
+      name: `${other.given} ${other.family}`,
       dateOfBirth: other.dobIso,
     });
     neg.linkWrongDob = { status: wrongDob.status, body: wrongDob.json };

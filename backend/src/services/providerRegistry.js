@@ -29,7 +29,7 @@ class ProviderRegistry {
     };
   }
 
-  register({ providerID, hospitalID, name, role, department, status }) {
+  register({ providerID, hospitalID, name, role, department, status, source, emrSyncedAt, email }) {
     if (!providerID || !hospitalID) {
       throw new Error('providerID and hospitalID are required');
     }
@@ -46,7 +46,13 @@ class ProviderRegistry {
       department: department || 'General',
       status: normalizedStatus,
       registeredAt: existing?.registeredAt || new Date().toISOString(),
+      // 'emr': pulled from the hospital's EMR, which stays the authority
+      // for name, role, department and status. 'manual': typed in here.
+      source: source || existing?.source || 'manual',
     };
+    if (emrSyncedAt || existing?.emrSyncedAt) provider.emrSyncedAt = emrSyncedAt || existing.emrSyncedAt;
+    // Contact email from the EMR (off-chain only; never an on-chain ID).
+    if (email || existing?.email) provider.email = email || existing.email;
     this.sql.upsert.run(hospitalID, providerID, JSON.stringify(provider), provider.status, provider.registeredAt);
     return provider;
   }

@@ -69,14 +69,19 @@ test('a clinician\'s provider ID and hospital are fixed to their account', async
   await expect(page).toHaveURL(/\/clinician$/);
   await expect(sectionLinks(page)).toHaveCount(1);
   await expect(sectionLinks(page)).toHaveText(/Clinician Portal/);
-  for (const label of ['Request Access', 'Emergency Access', 'View Records']) {
+  for (const label of ['Overview', 'Request Access', 'Emergency Access', 'View Records']) {
     await expect(navLink(page, label)).toBeVisible();
   }
   await expect(page.getByRole('link', { name: /Patient Portal|Admin Dashboard/ })).toHaveCount(0);
 
+  // Home is the clinician overview.
+  await expect(page.getByRole('heading', { name: 'Ready to open' })).toBeVisible();
   // Patients are found by the clinician's OWN hospital's numbers only.
+  await gotoNav(page, 'Request Access');
   await expect(field(page, `Patient’s hospital number at ${H.langtang.name}`)).toBeVisible();
   await gotoNav(page, 'Emergency Access');
+  // The form opens on the emergency-code tab; this test uses a hospital number.
+  await page.getByRole('tab', { name: 'Hospital number' }).click();
   const targets = field(page, 'Hospital holding the records').locator('option');
   await expect(targets.filter({ hasText: H.wase.name })).toHaveCount(1);
   await expect(targets.filter({ hasText: H.langtang.name })).toHaveCount(0);
