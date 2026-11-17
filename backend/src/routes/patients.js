@@ -283,6 +283,39 @@ function patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStor
     res.json(fhirAdapter.listLinksForPatient(req.params.did));
   });
 
+  // The patient removes a hospital from their network. Only the off-chain
+  // DID <-> hospital-number link is deleted (linking never touched the
+  // chain either); the hospital's roster record and any record pointers
+  // already on the ledger stay. Refused while a grant involving that
+  // hospital is still active or pending: revoking needs the patient's own
+  // signature, so they must revoke or decline it first.
+  router.delete('/:did/facilities/:hospitalID', async (req, res) => {
+    if (!isPatientSelf(req.user, req.params.did)) return deny(res, 'patients can only unlink facilities from their own DID');
+    const { did, hospitalID } = req.params;
+    if (!fhirAdapter.listLinksForPatient(did).some((l) => l.hospitalID === hospitalID)) {
+      return res.status(404).json({ error: 'that hospital is not in your network' });
+    }
+    try {
+      const ledger = await ledgerPromise;
+      const grants = (await ledger.getGrantsForPatient(did)) || [];
+      const now = Date.now();
+      const open = grants.filter((g) =>
+        (g.hospitalID === hospitalID || g.requesterHospitalID === hospitalID) &&
+        (g.status === 'PENDING' || (g.status === 'ACTIVE' && !(g.expiresAt && Date.parse(g.expiresAt) <= now))));
+      if (open.length) {
+        return res.status(409).json({
+          error: `You have ${open.length} active or pending access ${open.length === 1 ? 'grant' : 'grants'} involving this hospital. Revoke or decline ${open.length === 1 ? 'it' : 'them'} under Access first, then unlink.`,
+          grants: open.map((g) => g.grantID),
+        });
+      }
+      fhirAdapter.unlinkPatient(hospitalID, did);
+      if (logger) logger.info('patient unlinked facility', { hospitalID });
+      res.json({ hospitalID, unlinked: true });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   router.get('/:did/references', async (req, res) => {
     if (!isPatientSelf(req.user, req.params.did) && !hasRole(req.user, ROLES.HOSPITAL_ADMIN, ROLES.SYSTEM_ADMIN)) {
       return deny(res);

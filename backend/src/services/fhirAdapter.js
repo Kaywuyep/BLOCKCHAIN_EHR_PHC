@@ -48,6 +48,7 @@ class FhirAdapter {
       linksForPatient: q('SELECT hospital_id, hospital_number, linked_at FROM did_links WHERE patient_did = ? ORDER BY linked_at'),
       linksForHospital: q('SELECT patient_did, hospital_number, linked_at FROM did_links WHERE hospital_id = ? ORDER BY linked_at DESC'),
       getDidByHospitalNumber: q('SELECT patient_did FROM did_links WHERE hospital_id = ? AND hospital_number = ?'),
+      deleteLink: q('DELETE FROM did_links WHERE hospital_id = ? AND patient_did = ?'),
       insertBundle: q('INSERT INTO clinical_bundles (id, hospital_id, hospital_number, bundle_enc, created_at) VALUES (?, ?, ?, ?, ?)'),
       listBundles: q(`SELECT bundle_enc FROM clinical_bundles WHERE hospital_id = ? AND hospital_number = ?
                       ORDER BY created_at, rowid`),
@@ -99,6 +100,13 @@ class FhirAdapter {
   findDidByHospitalNumber(hospitalID, hospitalNumber) {
     const row = this.sql.getDidByHospitalNumber.get(hospitalID, hospitalNumber);
     return row ? row.patient_did : null;
+  }
+
+  /** Removes a DID's link at one hospital. The hospital's own roster
+   *  record is untouched, so the patient can link it again later.
+   *  Returns true if a link was removed. */
+  unlinkPatient(hospitalID, patientDID) {
+    return this.sql.deleteLink.run(hospitalID, patientDID).changes > 0;
   }
 
   /** Links a DID to a hospital number (or a freshly minted MRN). */

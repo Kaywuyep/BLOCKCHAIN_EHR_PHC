@@ -269,3 +269,45 @@ test('POST /:did/link-facility rate-limits repeated lookups for the same patient
     await server.close();
   }
 });
+
+test('DELETE /:did/facilities/:hospitalID removes the link so it stays gone on reload', async () => {
+  const server = await createTestServer();
+  try {
+    const did = 'did:patientchain:unlink1';
+    server.ledger.registerPatient({ patientDID: did, publicKey: 'pk' });
+    server.fhirAdapter.registerLocalPatient('HospitalA', did, 'A-1');
+    server.fhirAdapter.registerLocalPatient('HospitalB', did, 'B-1');
+
+    const res = await fetch(`${server.baseUrl}/api/patients/${did}/facilities/HospitalB`, { method: 'DELETE' });
+    assert.equal(res.status, 200);
+
+    const list = await (await fetch(`${server.baseUrl}/api/patients/${did}/facilities`)).json();
+    assert.deepEqual(list.map((l) => l.hospitalID), ['HospitalA']);
+
+    const again = await fetch(`${server.baseUrl}/api/patients/${did}/facilities/HospitalB`, { method: 'DELETE' });
+    assert.equal(again.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test('DELETE /:did/facilities/:hospitalID is refused while a grant involving that hospital is pending', async () => {
+  const server = await createTestServer();
+  try {
+    const did = 'did:patientchain:unlink2';
+    server.ledger.registerPatient({ patientDID: did, publicKey: 'pk' });
+    server.fhirAdapter.registerLocalPatient('HospitalA', did, 'A-1');
+    server.fhirAdapter.registerLocalPatient('HospitalB', did, 'B-1');
+    server.ledger.requestAccess({
+      grantID: 'g-unlink', patientDID: did, providerID: 'doc1', hospitalID: 'HospitalA',
+      requesterHospitalID: 'HospitalB', scope: 'all', purpose: 'treatment',
+    });
+
+    const res = await fetch(`${server.baseUrl}/api/patients/${did}/facilities/HospitalB`, { method: 'DELETE' });
+    assert.equal(res.status, 409);
+    const list = await (await fetch(`${server.baseUrl}/api/patients/${did}/facilities`)).json();
+    assert.equal(list.length, 2);
+  } finally {
+    await server.close();
+  }
+});

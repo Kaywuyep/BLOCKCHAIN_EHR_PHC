@@ -42,6 +42,7 @@ export function PatientApp() {
   const [facilityName, setFacilityName] = useState(session?.displayName || '');
   const [facilityMatch, setFacilityMatch] = useState(null);
   const [facilityError, setFacilityError] = useState(null);
+  const [unlinkError, setUnlinkError] = useState(null);
   const [linkedFacilities, setLinkedFacilities] = useState([]);
 
   // All hospitals directory (for name lookups)
@@ -205,8 +206,18 @@ export function PatientApp() {
     setFacilityError(null);
   }
 
-  function handleUnlink(hospitalID) {
-    setLinkedFacilities(prev => prev.filter(f => f.hospitalID !== hospitalID));
+  async function handleUnlink(hospitalID) {
+    if (!window.confirm(`Remove ${hospitalName(hospitalID)} from your network? You can add it again later with your hospital number.`)) return;
+    setLoading(true);
+    setUnlinkError(null);
+    try {
+      await api.unlinkFacility(patientDID, hospitalID);
+      setLinkedFacilities(prev => prev.filter(f => f.hospitalID !== hospitalID));
+    } catch (e) {
+      setUnlinkError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Access grant helpers
@@ -505,6 +516,7 @@ export function PatientApp() {
               {/* My Network */}
               <div className="panel">
                 <div className="panel-head"><div><span className="eyebrow">Your network</span><h2>My Hospital Network ({linkedFacilities.length})</h2></div></div>
+                {unlinkError && <div className="error-banner" style={{ marginBottom: 12 }}>{unlinkError}</div>}
                 {linkedFacilities.length === 0 ? (
                   <p style={{ color: 'var(--ink-soft)', fontSize: 14 }}>
                     No hospitals added yet. Search for a hospital below to add it to your network.

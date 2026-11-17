@@ -30,6 +30,8 @@ export const api = {
   registerLookup: (data) => request('/patients/register/lookup', { method: 'POST', body: JSON.stringify(data) }),
   getMyFacilities: (did) => request(`/patients/${encodeURIComponent(did)}/facilities`),
   getPatient: (did) => request(`/patients/${encodeURIComponent(did)}`),
+  unlinkFacility: (did, hospitalID) =>
+    request(`/patients/${encodeURIComponent(did)}/facilities/${encodeURIComponent(hospitalID)}`, { method: 'DELETE' }),
   linkFacility: (did, data) =>
     request(`/patients/${encodeURIComponent(did)}/link-facility`, { method: 'POST', body: JSON.stringify(data) }),
   confirmLink: (did, data) =>
