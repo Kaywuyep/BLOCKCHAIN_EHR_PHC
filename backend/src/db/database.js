@@ -155,6 +155,101 @@ const MIGRATIONS = [
   );
   CREATE INDEX emergency_notes_by_grant ON emergency_notes (grant_id);
   `,
+  // Diagnosis catalogue and anonymous diagnosis counts (Insights page).
+  // diagnosis_terms: ICD-10 codes (system 'ICD-10') and terms clinicians
+  //   added (system 'LOCAL', status 'pending' until a health records
+  //   officer maps them to ICD-10: status 'mapped', mapped_to = the code).
+  // diagnosis_counts: one row per month x viewing hospital x records
+  //   hospital x clinician role x code. No patient, grant or clinician ID.
+  // diagnosis_count_clinicians: keyed HMACs of clinician IDs, only to
+  //   count distinct clinicians; not reversible without the server key.
+  // diagnosis_tag_once: keyed HMAC of (grant, code) so re-ticking the
+  //   same diagnosis on the same grant is not counted twice.
+  `
+  CREATE TABLE diagnosis_terms (
+    code        TEXT PRIMARY KEY,
+    system      TEXT NOT NULL,
+    display     TEXT NOT NULL,
+    synonyms    TEXT NOT NULL DEFAULT '[]',
+    status      TEXT NOT NULL,
+    mapped_to   TEXT,
+    created_by  TEXT,
+    created_at  TEXT NOT NULL,
+    reviewed_by TEXT,
+    reviewed_at TEXT
+  );
+  CREATE INDEX diagnosis_terms_by_status ON diagnosis_terms (status);
+  CREATE TABLE diagnosis_counts (
+    period              TEXT NOT NULL,
+    viewer_hospital_id  TEXT NOT NULL,
+    records_hospital_id TEXT NOT NULL,
+    role                TEXT NOT NULL,
+    code                TEXT NOT NULL,
+    views               INTEGER NOT NULL,
+    PRIMARY KEY (period, viewer_hospital_id, records_hospital_id, role, code)
+  );
+  CREATE TABLE diagnosis_count_clinicians (
+    period             TEXT NOT NULL,
+    viewer_hospital_id TEXT NOT NULL,
+    code               TEXT NOT NULL,
+    clinician_hash     TEXT NOT NULL,
+    PRIMARY KEY (period, viewer_hospital_id, code, clinician_hash)
+  );
+  CREATE TABLE diagnosis_tag_once (
+    token TEXT PRIMARY KEY
+  );
+  `,
+  // Episode intervals and short-lived links (replaces diagnosis_tag_once,
+  // whose grant-to-diagnosis hashes never expired).
+  // interval_days: how long after a tick the same diagnosis for the same
+  //   patient counts as the same episode; NULL = the system default, set by
+  //   the system admin in diagnosis_settings.
+  // diagnosis_episodes: keyed hash of (patient, code) -> when the current
+  //   episode ends. Deleted when it ends.
+  // diagnosis_grant_notes: what was ticked under one grant (keyed hash of
+  //   the grant), so the clinician sees what they noted and can undo a
+  //   mistake the same day. Deleted when the grant expires or is revoked.
+  `
+  DELETE FROM diagnosis_tag_once;
+  ALTER TABLE diagnosis_terms ADD COLUMN interval_days INTEGER;
+  ALTER TABLE diagnosis_count_clinicians ADD COLUMN ticks INTEGER NOT NULL DEFAULT 1;
+  CREATE TABLE diagnosis_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  CREATE TABLE diagnosis_episodes (
+    token      TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    ends_at    TEXT NOT NULL
+  );
+  CREATE INDEX diagnosis_episodes_by_end ON diagnosis_episodes (ends_at);
+  CREATE TABLE diagnosis_grant_notes (
+    grant_token         TEXT NOT NULL,
+    code                TEXT NOT NULL,
+    noted_at            TEXT NOT NULL,
+    counted             INTEGER NOT NULL,
+    period              TEXT NOT NULL,
+    viewer_hospital_id  TEXT NOT NULL,
+    records_hospital_id TEXT NOT NULL,
+    role                TEXT NOT NULL,
+    clinician_hash      TEXT NOT NULL,
+    episode_token       TEXT NOT NULL,
+    grant_ends_at       TEXT NOT NULL,
+    PRIMARY KEY (grant_token, code, noted_at)
+  );
+  CREATE INDEX diagnosis_grant_notes_by_end ON diagnosis_grant_notes (grant_ends_at);
+  `,
+  // Patient emergency codes: 7 characters a family member can give a
+  // clinician in place of a hospital number. code_hash (keyed) is the
+  // lookup; code_enc lets the patient see their own code again.
+  `
+  CREATE TABLE emergency_codes (
+    patient_did TEXT PRIMARY KEY,
+    code_hash   TEXT NOT NULL UNIQUE,
+    code_enc    TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];
 
 function migrate(db) {

@@ -1,0 +1,2 @@
+{ "hospital-a": { "mode": "hl7", "mllpPort": 5101, "hl7Version": "2.5" },
+  "hospital-b": { "mode": "hl7", "mllpPort": 5102, "hl7Version": "2.5" } }

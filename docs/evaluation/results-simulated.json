@@ -1,6 +1,6 @@
 {
-  "run": "F30BEE",
-  "startedAt": "2026-11-06T10:43:48.141Z",
+  "run": "8ECCD4",
+  "startedAt": "2026-11-14T17:24:31.680Z",
   "base": "http://localhost:4601",
   "ledgerMode": "simulated",
   "patients": 10,
@@ -17,15 +17,15 @@
       },
       "ackLatencyMs": {
         "n": 30,
-        "mean": 1.9,
-        "median": 1.8,
-        "p95": 3.3,
-        "min": 1,
-        "max": 7.7
+        "mean": 3.4,
+        "median": 2.8,
+        "p95": 6.8,
+        "min": 1.6,
+        "max": 13.2
       },
       "malformedMessagesAck": [
-        "AE",
-        "AE"
+        "AR",
+        "AR"
       ],
       "patientsOnRoster": 10,
       "patientsExpected": 10
@@ -42,15 +42,15 @@
       },
       "ackLatencyMs": {
         "n": 30,
-        "mean": 1.6,
-        "median": 1.6,
-        "p95": 2,
-        "min": 1.1,
-        "max": 2
+        "mean": 2.5,
+        "median": 2.2,
+        "p95": 3.5,
+        "min": 1.4,
+        "max": 8
       },
       "malformedMessagesAck": [
-        "AE",
-        "AE"
+        "AR",
+        "AR"
       ],
       "patientsOnRoster": 10,
       "patientsExpected": 10
@@ -81,75 +81,75 @@
     "timingsMs": {
       "register": {
         "n": 10,
-        "mean": 4.1,
-        "median": 3.8,
-        "p95": 8.7,
-        "min": 2.5,
-        "max": 8.7
+        "mean": 5.6,
+        "median": 5.4,
+        "p95": 8.8,
+        "min": 4.2,
+        "max": 8.8
       },
       "registerReference": {
         "n": 20,
-        "mean": 4.1,
-        "median": 3.9,
-        "p95": 5.6,
-        "min": 3.5,
-        "max": 5.6
+        "mean": 5,
+        "median": 4.8,
+        "p95": 9,
+        "min": 2.9,
+        "max": 9
       },
       "linkLookup": {
         "n": 10,
-        "mean": 4,
-        "median": 3.9,
-        "p95": 5.9,
-        "min": 2.4,
-        "max": 5.9
+        "mean": 5.5,
+        "median": 5,
+        "p95": 8.3,
+        "min": 4.4,
+        "max": 8.3
       },
       "linkConfirm": {
         "n": 10,
-        "mean": 4.4,
-        "median": 3.9,
-        "p95": 8,
-        "min": 3.4,
-        "max": 8
+        "mean": 5.7,
+        "median": 6,
+        "p95": 9.3,
+        "min": 3.3,
+        "max": 9.3
       },
       "request": {
         "n": 20,
-        "mean": 3.5,
-        "median": 3.7,
-        "p95": 4.4,
-        "min": 2.3,
-        "max": 4.4
+        "mean": 4.4,
+        "median": 4.5,
+        "p95": 5.6,
+        "min": 3.2,
+        "max": 5.6
       },
       "grant": {
         "n": 20,
-        "mean": 3.3,
-        "median": 3.5,
-        "p95": 4.7,
-        "min": 2.1,
-        "max": 4.7
+        "mean": 4.7,
+        "median": 4.7,
+        "p95": 6.6,
+        "min": 3.3,
+        "max": 6.6
       },
       "authorisationLatency": {
         "n": 20,
-        "mean": 7.2,
-        "median": 7.1,
-        "p95": 11.8,
-        "min": 5.3,
-        "max": 11.8
+        "mean": 9.7,
+        "median": 9.4,
+        "p95": 14.6,
+        "min": 7.7,
+        "max": 14.6
       },
       "resolve": {
         "n": 20,
-        "mean": 3.3,
-        "median": 3.2,
-        "p95": 6.3,
-        "min": 2,
-        "max": 6.3
+        "mean": 4.3,
+        "median": 4.3,
+        "p95": 7.3,
+        "min": 2.9,
+        "max": 7.3
       },
       "revoke": {
         "n": 20,
-        "mean": 3.9,
-        "median": 4,
-        "p95": 4.7,
-        "min": 2.4,
-        "max": 4.7
+        "mean": 4.5,
+        "median": 4.5,
+        "p95": 6.3,
+        "min": 3.3,
+        "max": 6.3
       }
     },
     "objectSizesBytes": {
@@ -163,27 +163,27 @@
       },
       "grant": {
         "n": 20,
-        "mean": 438,
-        "median": 438,
-        "p95": 438,
-        "min": 438,
-        "max": 438
+        "mean": 543,
+        "median": 543,
+        "p95": 543,
+        "min": 543,
+        "max": 543
       },
       "audit": {
         "n": 9,
-        "mean": 325.6,
-        "median": 328,
-        "p95": 338,
+        "mean": 344.4,
+        "median": 345,
+        "p95": 373,
         "min": 316,
-        "max": 338
+        "max": 373
       },
       "fhirBundle": {
         "n": 20,
-        "mean": 1598,
-        "median": 1598,
-        "p95": 1598,
-        "min": 1598,
-        "max": 1598
+        "mean": 2966,
+        "median": 2966,
+        "p95": 2966,
+        "min": 2966,
+        "max": 2966
       }
     },
     "negativeChecks": {
@@ -217,17 +217,17 @@
     "auditHasReviewEntry": true,
     "latencyMs": {
       "n": 5,
-      "mean": 4.1,
-      "median": 4.3,
-      "p95": 4.9,
-      "min": 2.7,
-      "max": 4.9
+      "mean": 5.1,
+      "median": 4.9,
+      "p95": 5.6,
+      "min": 4.8,
+      "max": 5.6
     }
   },
   "offlineSync": {
     "actionsQueued": 15,
     "allAcceptedAs202WhileOffline": true,
-    "queueingTimeMs": 66,
+    "queueingTimeMs": 58,
     "reconciled": 15,
     "synced": 15,
     "failed": 0,
@@ -252,15 +252,15 @@
     },
     "counters": {
       "registration": 10,
-      "reference": 20,
+      "reference": 50,
       "grant": 86,
       "audit": 78,
       "breakglass": 5
     },
     "rates": {
-      "lambda_r": 5.691519635742743,
-      "lambda_g": 24.473534433693796,
-      "lambda_a": 22.1969265793967
+      "lambda_r": 29.638411381149968,
+      "lambda_g": 50.978067575577946,
+      "lambda_a": 46.23592175459395
     },
     "actionCostAtCurrentBatch": 22,
     "actionCostCurve": [
@@ -465,12 +465,12 @@
         "cost": 18.8
       }
     ],
-    "ledgerRate": 1151.964,
+    "ledgerRate": 2790.753,
     "ledgerGrowth": {
-      "bytesPerSecond": 12942.52,
-      "baselineBytesPerSecondIfFullRecordOnChain": 269060.9,
-      "reductionFactor": 20.8
+      "bytesPerSecond": 30871.37,
+      "baselineBytesPerSecondIfFullRecordOnChain": 1364599.88,
+      "reductionFactor": 44.2
     }
   },
-  "finishedAt": "2026-11-06T10:43:49.112Z"
+  "finishedAt": "2026-11-14T17:24:32.888Z"
 }

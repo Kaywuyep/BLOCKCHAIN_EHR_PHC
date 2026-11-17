@@ -90,3 +90,10 @@ The legal reasoning is in `docs/legal-basis-emergency-access.md`.
 14. **Custom REST push.** As `rest-psh` via the API, `POST /api/ingest/plateau-specialist-hospital` with FHIR R4 JSON (example under **Hospitals → Plateau Specialist → Connection**).
 15. **Offline mode.** As `superadmin`, **Sync Status** → go offline. Approve or revoke as a patient (it is queued), then go online again and the queue replays in order.
 16. **Screenshot deterrent.** Press PrintScreen (Windows) or Cmd+Shift+4 (Mac): the noise appears and the attempt is logged.
+
+## Emergency codes and Insights (added 16 Nov 2026)
+
+- **Emergency codes.** Each patient sees a 7-character code on **My Health ID** (Show / Copy / Print card / Replace code). Demo codes: Amina `AMN4K7Q`, Ibrahim `BRH3X9T`, Fatima `FTM8C2P`, Chinedu `CHN5W6R`. As `dr-musa`, open **Emergency Access**, choose **Emergency code**, enter `BRH3X9T`, **Find hospitals**, pick JUTH, give a reason and open. The lookup and the break-glass both appear on Ibrahim's audit trail. Five wrong codes lock the clinician out for 15 minutes.
+- **Diagnosis ticks.** In **View Records**, open any record and use **What is this visit about?**. A diagnosis already noted on that access is greyed out until its interval has passed; your own tick can be undone the same day.
+- **Insights** (as `superadmin`): **Access activity**, and **Diagnosis trends** with the new-term review queue and **Episode intervals**.
+

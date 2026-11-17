@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const { ROLES, hasRole, actsForHospital, isPatientSelf, isSystemAdmin, deny, actorID } = require('../auth/policy');
 const { EmergencyDetails } = require('../services/emergencyDetails');
 const { BREAK_GLASS_MINUTES } = require('../services/emergencyPolicy');
+const { EmergencyCodes } = require('../services/emergencyCodes');
 
 /**
  * access.js — access between facilities (Sections 3.4.1, 3.4.7).
@@ -29,6 +30,7 @@ const HOSPITAL_STAFF = 'hospital-staff@';
 function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhirAdapter = null, { db = null, cipher = null, hospitalRegistry = null } = {}) {
   const router = express.Router();
   const emergency = db && cipher ? new EmergencyDetails({ db, cipher }) : null;
+  const codes = db && cipher ? new EmergencyCodes({ db, cipher }) : null;
 
   async function loadGrant(grantID) {
     const ledger = await ledgerPromise;
@@ -84,6 +86,85 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
   // A clinician asks the patient for records held at another hospital in
   // the patient's network. body: { patientDID, providerID, hospitalID (the
   // record-holding hospital), scope, purpose }.
+  // ── Patient emergency code ────────────────────────────────────────────
+  // A 7-character code the patient keeps (printed, on their phone) so that
+  // family who do not know a hospital number can still give a clinician a
+  // way to start break-glass. Every use is on the patient's audit trail.
+
+  function patientNameOf(patientDID) {
+    if (!fhirAdapter) return null;
+    for (const l of fhirAdapter.listLinksForPatient(patientDID)) {
+      const r = fhirAdapter.findLocalPatientRecord(l.hospitalID, l.hospitalNumber);
+      if (r && r.name) return r.name;
+    }
+    return null;
+  }
+
+  async function onChain(patientDID) {
+    const ledger = await ledgerPromise;
+    try {
+      return Boolean(await ledger.getPatient(patientDID));
+    } catch {
+      return false;
+    }
+  }
+
+  router.get('/emergency-code/:patientDID', async (req, res) => {
+    if (!codes) return res.status(501).json({ error: 'emergency codes need the database' });
+    const { patientDID } = req.params;
+    if (!isPatientSelf(req.user, patientDID)) return deny(res, 'only the patient can see their emergency code');
+    if (!(await onChain(patientDID))) return res.status(404).json({ error: 'create your Health ID first' });
+    return res.json(codes.get(patientDID));
+  });
+
+  router.post('/emergency-code/:patientDID/regenerate', async (req, res) => {
+    if (!codes) return res.status(501).json({ error: 'emergency codes need the database' });
+    const { patientDID } = req.params;
+    if (!isPatientSelf(req.user, patientDID)) return deny(res, 'only the patient can replace their emergency code');
+    if (!(await onChain(patientDID))) return res.status(404).json({ error: 'create your Health ID first' });
+    const result = codes.regenerate(patientDID);
+    const ledger = await ledgerPromise;
+    await audit(ledger, { patientDID, eventType: 'EMERGENCY_CODE_REPLACED', actorID: actorID(req.user, patientDID), hospitalID: '', detail: 'Emergency code replaced by the patient; the old code no longer works' });
+    return res.json(result);
+  });
+
+  /**
+   * Clinician: an emergency code -> the hospitals in that patient's
+   * network, to pick one for break-glass. Written to the patient's audit
+   * trail whether or not break-glass follows.
+   */
+  router.post('/emergency-code/lookup', async (req, res) => {
+    try {
+      if (!codes) return res.status(501).json({ error: 'emergency codes need the database' });
+      if (!req.user.superuser && !hasRole(req.user, ROLES.CLINICIAN)) return deny(res, 'only clinicians can use an emergency code');
+      const providerID = req.user.superuser ? (req.body || {}).providerID : req.user.providerID;
+      if (!providerID) return res.status(400).json({ error: 'providerID is required' });
+      const requesterHospitalID = requesterOf(req, providerID);
+      if (!requesterHospitalID) return res.status(400).json({ error: 'the requesting clinician has no hospital' });
+      if (providerRegistry && !req.user.superuser && !providerRegistry.isAuthorized(providerID, requesterHospitalID)) {
+        return deny(res, 'only active clinicians registered at your hospital can use an emergency code');
+      }
+      const patientDID = codes.resolve((req.body || {}).code, `${requesterHospitalID}/${providerID}`);
+      const network = networkOf(patientDID);
+      const ledger = await ledgerPromise;
+      await audit(ledger, {
+        patientDID, eventType: 'EMERGENCY_CODE_USED', actorID: providerID, hospitalID: requesterHospitalID,
+        detail: `Emergency code entered at ${hospitalName(requesterHospitalID)} to list the hospitals in your network`,
+      });
+      const inNetwork = network.includes(requesterHospitalID);
+      return res.json({
+        patientName: patientNameOf(patientDID),
+        requesterInNetwork: inNetwork,
+        hospitals: network.filter((h) => h !== requesterHospitalID).map((h) => ({ hospitalID: h, name: hospitalName(h) })),
+        ...(inNetwork ? {} : {
+          notice: `This patient has not added ${hospitalName(requesterHospitalID)} to their Cevruni network, so their records cannot be opened from here. Treat with the information available (NHA 2014 s.20 still applies).`,
+        }),
+      });
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message, ...(err.attemptsLeft !== undefined ? { attemptsLeft: err.attemptsLeft } : {}) });
+    }
+  });
+
   router.post('/request', async (req, res) => {
     try {
       const { patientDID, providerID, hospitalID, scope, purpose } = req.body || {};
@@ -132,7 +213,7 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
       const providerID = req.user.superuser ? body.providerID : req.user.providerID;
       const { hospitalID, justification } = body;
       if (!providerID || !hospitalID || !justification || !String(justification).trim()) {
-        return res.status(400).json({ error: 'hospitalID (the hospital holding the records), the patient\'s hospital number there and a justification are required' });
+        return res.status(400).json({ error: 'hospitalID (the hospital holding the records), the patient\'s hospital number there (or their emergency code) and a justification are required' });
       }
       const requesterHospitalID = requesterOf(req, providerID);
       if (!requesterHospitalID) return res.status(400).json({ error: 'the requesting clinician has no hospital' });
@@ -143,9 +224,18 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
         return deny(res, 'only active clinicians registered at your hospital can invoke emergency access');
       }
 
-      // Find the patient by their number at the record-holding hospital.
+      // Find the patient: by their number at the record-holding hospital,
+      // or by the emergency code the family gave (then the chosen hospital
+      // must be in the patient's network).
       let patientDID = null;
-      if (body.hospitalNumber && fhirAdapter) patientDID = fhirAdapter.findDidByHospitalNumber(hospitalID, String(body.hospitalNumber).trim());
+      const viaCode = Boolean(body.emergencyCode);
+      if (viaCode) {
+        if (!codes) return res.status(501).json({ error: 'emergency codes need the database' });
+        patientDID = codes.resolve(body.emergencyCode, `${requesterHospitalID}/${providerID}`);
+        if (!networkOf(patientDID).includes(hospitalID)) {
+          return res.status(409).json({ error: `${hospitalName(hospitalID)} is not in this patient's network` });
+        }
+      } else if (body.hospitalNumber && fhirAdapter) patientDID = fhirAdapter.findDidByHospitalNumber(hospitalID, String(body.hospitalNumber).trim());
       else if (req.user.superuser) patientDID = body.patientDID || null;
       if (!patientDID) {
         return res.status(404).json({ error: 'No Cevruni patient with that hospital number at that hospital' });
@@ -173,7 +263,7 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
 
       await audit(ledger, {
         patientDID, eventType: 'BREAK_GLASS_ACCESS', actorID: providerID, hospitalID,
-        detail: `Emergency access from ${hospitalName(requesterHospitalID)}; reason${representative ? ' and requesting representative' : ''} recorded off-chain (${emergency ? ref.slice(0, 19) : 'inline'})`,
+        detail: `Emergency access from ${hospitalName(requesterHospitalID)}${viaCode ? ' using your emergency code' : ''}; reason${representative ? ' and requesting representative' : ''} recorded off-chain (${emergency ? ref.slice(0, 19) : 'inline'})`,
       });
 
       const record = fhirAdapter ? fhirAdapter.listLinksForPatient(patientDID).find((l) => l.hospitalID === hospitalID) : null;

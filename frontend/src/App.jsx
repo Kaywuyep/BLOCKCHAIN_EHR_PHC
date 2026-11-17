@@ -26,6 +26,7 @@ const NAV_ITEMS = {
   ],
   '/admin': [
     { path: '/admin', label: 'Overview', icon: 'dashboard' },
+    { path: '/admin/insights', label: 'Insights', icon: 'insights', systemAdminOnly: true },
     { path: '/admin/access-log', label: 'Record Access Log', icon: 'history' },
     { path: '/admin/grants', label: 'Access Grants', icon: 'key' },
     { path: '/admin/clinicians', label: 'Clinicians', icon: 'stethoscope' },
@@ -267,6 +268,7 @@ function navIcon(name) {
     local_hospital: '\u{1F3E5}',
     people: '\u{1F465}',
     analytics: '\u{1F4C8}',
+    insights: '\u{1F4A1}',
     sync: '\u{1F504}',
     gavel: '\u{2696}',
     receipt_long: '\u{1F4DC}',

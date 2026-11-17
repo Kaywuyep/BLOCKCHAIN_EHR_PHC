@@ -4,6 +4,8 @@ const { randomUUID } = require('crypto');
 const D = require('./demoData');
 const { EmergencyDetails } = require('../services/emergencyDetails');
 const fixtures = require('../services/hl7AdtListener.fixtures');
+const { DiagnosisInsights } = require('../services/diagnosisInsights');
+const { EmergencyCodes } = require('../services/emergencyCodes');
 
 /**
  * demoSeed.js — loads the demo world (development only).
@@ -296,12 +298,66 @@ async function seedLedger(ctx, patients) {
   return true;
 }
 
+/**
+ * Sample diagnosis counts for Insights > Diagnosis trends: three months of
+ * ticks by synthetic clinicians, and two local terms awaiting review.
+ * Counts only; no patient is involved.
+ */
+function seedDiagnosisTrends({ db, cipher }) {
+  once(db, 'diagnosis-trends', () => {
+    const diag = new DiagnosisInsights({ db, hashKey: cipher ? cipher.keys.get(cipher.activeKid) : null });
+    const hospitals = [D.L, D.W, D.J, D.P, D.O];
+    const roles = ['Physician', 'Physician', 'Nurse', 'Consultant'];
+    // code -> ticks per month (oldest first)
+    const plan = {
+      B54: [38, 46, 61], 'B50.0': [6, 9, 12], 'A01.0': [14, 17, 15], I10: [22, 24, 27], 'E11.9': [11, 13, 12],
+      'J18.9': [9, 8, 13], 'D57.0': [7, 6, 9], A09: [10, 12, 8], B24: [6, 5, 7], 'O14.9': [5, 6, 6],
+      'N39.0': [4, 6, 5], 'A15.0': [2, 3, 2], 'A96.2': [0, 1, 2], 'G40.9': [1, 0, 2],
+    };
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    let k = 0;
+    for (let m = 0; m < 3; m += 1) {
+      const d = new Date();
+      d.setUTCDate(10);
+      d.setUTCMonth(d.getUTCMonth() - (2 - m));
+      for (const [code, perMonth] of Object.entries(plan)) {
+        for (let i = 0; i < perMonth[m]; i += 1) {
+          const viewer = hospitals[rnd(hospitals.length)];
+          let records = hospitals[rnd(hospitals.length)];
+          if (records === viewer) records = hospitals[(hospitals.indexOf(viewer) + 1) % hospitals.length];
+          k += 1;
+          diag.tag({
+            codes: [code], grantID: `demo-tag-${k}`, patientDID: `demo-patient-${k}`, grantEndsAt: d, clinicianID: `demo-clinician-${viewer}-${rnd(6)}`,
+            viewerHospitalID: viewer, recordsHospitalID: records, role: roles[rnd(roles.length)], at: d,
+          });
+        }
+      }
+    }
+    for (const term of ['Febrile illness with rash', 'Typhoid intestinal perforation']) {
+      const { term: t } = diag.addLocalTerm(term, { createdBy: 'dr-musa' });
+      for (let i = 0; i < 3; i += 1) {
+        k += 1;
+        diag.tag({ codes: [t.code], grantID: `demo-tag-${k}`, patientDID: `demo-patient-${k}`, grantEndsAt: new Date(Date.now() + 1000), clinicianID: 'dr-musa', viewerHospitalID: D.L, recordsHospitalID: D.J, role: 'Physician' });
+      }
+    }
+  });
+}
+
 async function runDemoSeed(ctx) {
   const { logger } = ctx;
   seedHospitals(ctx);
   seedPeople(ctx);
   seedRecords(ctx);
+  seedDiagnosisTrends(ctx);
   const patients = resolvePatients(ctx);
+  if (ctx.cipher) {
+    // Fixed emergency codes so the demo guide can name them (dev only).
+    once(ctx.db, 'emergency-codes', () => {
+      const codes = new EmergencyCodes({ db: ctx.db, cipher: ctx.cipher });
+      for (const p of patients) if (p.emergencyCode) codes.setForDemo(p.did, p.emergencyCode);
+    });
+  }
   const ledger = await ctx.ledgerPromise;
   if (ctx.cipher) ctx.emergencyDetails = new EmergencyDetails({ db: ctx.db, cipher: ctx.cipher });
   if (ctx.listenerManager) await ctx.listenerManager.syncAll();

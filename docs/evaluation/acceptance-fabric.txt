@@ -1,0 +1,89 @@
+node scripts/acceptance.js  (Fabric network, freshly seeded demo dataset, 14 November 2026)
+
+== health ==
+  ok   health 200, ledger fabric
+
+== patient: amina ==
+  ok   amina has Health ID
+  ok   patient on ledger
+  ok   4 hospitals in network
+  ok   pointers on ledger
+  ok   grants listed (pending/active/revoked/break-glass)
+  ok   audit trail from ledger
+  ok   cannot read another patient's record (403)
+
+== patient approves / declines ==
+  ok   approve dr-bello (4111 ms)
+  ok   decline dr-danladi
+
+== clinician dr-bello (JUTH) reads Langtang records ==
+  ok   resolve via grant (2061 ms)
+       types: Encounter,Observation,MedicationRequest,DiagnosticReport,DocumentReference,Condition
+  ok   grant does not open another hospital (403)
+  ok   cannot use someone else's grant (403)
+
+== clinician dr-musa (Langtang): break-glass already active ==
+  ok   active break-glass in My Grants
+  ok   emergency read returns only emergency types
+  ok   emergency details decrypt and match ledger hash
+  ok   extend break-glass (4105 ms)
+  ok   extend without reason refused
+
+== request rules ==
+  ok   cross-facility request in network (2056 ms)
+  ok   own-hospital request refused (400)
+  ok   patient without Langtang in network refused
+  ok   lookup by own hospital number
+  ok   lookup at another hospital's numbers refused
+
+== new break-glass on Fabric ==
+  ok   break-glass by hospital number (4103 ms)
+  ok   scope = emergency set, 60 min
+  ok   break-glass for patient without OLA in network refused (409)
+  ok   break-glass at own hospital refused (400)
+
+== suspended clinician ==
+  ok   suspended clinician refused despite ACTIVE grant
+
+== hospital admins ==
+  ok   JUTH admin overview
+  ok   JUTH admin access-log
+  ok   JUTH admin grants
+  ok   JUTH admin clinicians
+  ok   JUTH admin patients
+  ok   JUTH admin sees pending break-glass
+  ok   JUTH admin reviews break-glass (4099 ms)
+  ok   second review refused with readable chaincode message
+  ok   Langtang admin sees outgoing grants
+  ok   Wase admin cannot see JUTH's view
+
+== system admin ==
+  ok   GET /admin/hospitals
+  ok   GET /admin/users
+  ok   GET /hospitals/status
+  ok   GET /hl7/stats
+  ok   GET /hl7/messages
+  ok   GET /sync/status
+  ok   GET /cost/summary
+  ok   GET /audit/screen-captures
+  ok   GET /audit/events/recent
+  ok   test JUTH FHIR connection
+  ok   test HL7 parse
+  ok   chaincode events arriving from Fabric
+
+== patient revokes; clinician loses access ==
+  ok   revoke (4102 ms)
+  ok   revoked grant refused (403)
+
+== standing share (hospital-staff) ==
+  ok   Langtang clinician reads PSH records via standing share
+
+== registration + first-facility link (Hauwa) ==
+  ok   registration lookup
+  ok   register DID on Fabric (2054 ms)
+
+== ingestion ==
+  ok   HL7 A01 over MLLP (Langtang) -> AA
+  ok   REST ingest (PSH)
+
+57 passed, 0 failed  (35.7 s)

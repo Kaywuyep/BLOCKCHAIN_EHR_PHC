@@ -1,6 +1,6 @@
 {
-  "run": "E430D9",
-  "startedAt": "2026-11-06T10:33:23.871Z",
+  "run": "C049CA",
+  "startedAt": "2026-11-14T17:27:49.014Z",
   "base": "http://localhost:4600",
   "ledgerMode": "fabric",
   "patients": 10,
@@ -17,15 +17,15 @@
       },
       "ackLatencyMs": {
         "n": 30,
-        "mean": 2.9,
-        "median": 2.9,
-        "p95": 4.5,
-        "min": 1.2,
-        "max": 10.8
+        "mean": 3.7,
+        "median": 3.1,
+        "p95": 5.8,
+        "min": 2.2,
+        "max": 14.7
       },
       "malformedMessagesAck": [
-        "AE",
-        "AE"
+        "AR",
+        "AR"
       ],
       "patientsOnRoster": 10,
       "patientsExpected": 10
@@ -42,15 +42,15 @@
       },
       "ackLatencyMs": {
         "n": 30,
-        "mean": 1.7,
-        "median": 1.7,
-        "p95": 2.9,
-        "min": 0.9,
-        "max": 3.1
+        "mean": 2.8,
+        "median": 2.8,
+        "p95": 3.6,
+        "min": 2.1,
+        "max": 3.8
       },
       "malformedMessagesAck": [
-        "AE",
-        "AE"
+        "AR",
+        "AR"
       ],
       "patientsOnRoster": 10,
       "patientsExpected": 10
@@ -81,75 +81,75 @@
     "timingsMs": {
       "register": {
         "n": 10,
-        "mean": 2080.6,
-        "median": 2066.1,
-        "p95": 2207.8,
-        "min": 2062.5,
-        "max": 2207.8
+        "mean": 2067.5,
+        "median": 2065.8,
+        "p95": 2094.4,
+        "min": 2059.2,
+        "max": 2094.4
       },
       "registerReference": {
         "n": 20,
-        "mean": 2060.8,
-        "median": 2059.9,
-        "p95": 2069.5,
-        "min": 2054.6,
-        "max": 2069.5
+        "mean": 2060.6,
+        "median": 2060.8,
+        "p95": 2065.7,
+        "min": 2055.3,
+        "max": 2065.7
       },
       "linkLookup": {
         "n": 10,
-        "mean": 4.8,
-        "median": 4.8,
-        "p95": 6.8,
-        "min": 3.4,
-        "max": 6.8
+        "mean": 5.8,
+        "median": 6.1,
+        "p95": 7.3,
+        "min": 4.2,
+        "max": 7.3
       },
       "linkConfirm": {
         "n": 10,
-        "mean": 4.6,
-        "median": 4.1,
-        "p95": 8.7,
-        "min": 2.7,
-        "max": 8.7
+        "mean": 6166.6,
+        "median": 6164.4,
+        "p95": 6190.2,
+        "min": 6157.7,
+        "max": 6190.2
       },
       "request": {
         "n": 20,
-        "mean": 2055.8,
-        "median": 2055.1,
-        "p95": 2061.5,
-        "min": 2051.5,
-        "max": 2061.5
+        "mean": 2056.1,
+        "median": 2056,
+        "p95": 2063.6,
+        "min": 2048.6,
+        "max": 2063.6
       },
       "grant": {
         "n": 20,
-        "mean": 4096.2,
-        "median": 4096,
-        "p95": 4101.4,
-        "min": 4089.9,
-        "max": 4101.4
+        "mean": 4103.1,
+        "median": 4104.3,
+        "p95": 4107.1,
+        "min": 4093.9,
+        "max": 4107.1
       },
       "authorisationLatency": {
         "n": 20,
-        "mean": 6151.2,
-        "median": 6150.6,
-        "p95": 6159.6,
-        "min": 6142.6,
-        "max": 6159.6
+        "mean": 6161.6,
+        "median": 6162.1,
+        "p95": 6171.7,
+        "min": 6151.5,
+        "max": 6171.7
       },
       "resolve": {
         "n": 20,
-        "mean": 2054.2,
-        "median": 2054,
-        "p95": 2058.1,
-        "min": 2050.4,
-        "max": 2058.1
+        "mean": 2057.4,
+        "median": 2057.7,
+        "p95": 2064.4,
+        "min": 2051.1,
+        "max": 2064.4
       },
       "revoke": {
         "n": 20,
-        "mean": 4096.3,
-        "median": 4096.7,
-        "p95": 4108.1,
-        "min": 4091.3,
-        "max": 4108.1
+        "mean": 4105.4,
+        "median": 4104.2,
+        "p95": 4125.2,
+        "min": 4098.4,
+        "max": 4125.2
       }
     },
     "objectSizesBytes": {
@@ -163,27 +163,27 @@
       },
       "grant": {
         "n": 20,
-        "mean": 420.8,
-        "median": 421,
-        "p95": 421,
-        "min": 419,
-        "max": 421
+        "mean": 525.6,
+        "median": 526,
+        "p95": 526,
+        "min": 524,
+        "max": 526
       },
       "audit": {
         "n": 9,
-        "mean": 325.6,
-        "median": 328,
-        "p95": 338,
+        "mean": 344.3,
+        "median": 345,
+        "p95": 372,
         "min": 316,
-        "max": 338
+        "max": 372
       },
       "fhirBundle": {
         "n": 20,
-        "mean": 1598,
-        "median": 1598,
-        "p95": 1598,
-        "min": 1598,
-        "max": 1598
+        "mean": 2966,
+        "median": 2966,
+        "p95": 2966,
+        "min": 2966,
+        "max": 2966
       }
     },
     "negativeChecks": {
@@ -217,11 +217,11 @@
     "auditHasReviewEntry": true,
     "latencyMs": {
       "n": 5,
-      "mean": 4097.1,
-      "median": 4097.2,
-      "p95": 4102,
-      "min": 4092.5,
-      "max": 4102
+      "mean": 4099,
+      "median": 4100.1,
+      "p95": 4110.4,
+      "min": 4084.2,
+      "max": 4110.4
     }
   },
   "auditIntegrity": {
@@ -236,7 +236,7 @@
       },
       "overwriteExistingEntry": {
         "rejected": true,
-        "message": "Error: endorsement failure during invoke. response: status:500 message:\"audit entry 25949937-4f32-4de0-ab4c-049ae487cadf already exists\""
+        "message": "Error: endorsement failure during invoke. response: status:500 message:\"audit entry 1436cc9f-1500-4ca0-a1d6-1610e7a76ff9 already exists\""
       }
     },
     "allRejected": true,
@@ -247,11 +247,11 @@
   "offlineSync": {
     "actionsQueued": 15,
     "allAcceptedAs202WhileOffline": true,
-    "queueingTimeMs": 49,
+    "queueingTimeMs": 62,
     "reconciled": 15,
     "synced": 15,
     "failed": 0,
-    "reconcileTimeMs": 40937,
+    "reconcileTimeMs": 40950,
     "finalGrantStates": [
       "REVOKED",
       "REVOKED",
@@ -268,19 +268,19 @@
       "succeeded": 1,
       "blocksCut": 1,
       "txPerBlock": 1,
-      "wallClockMs": 2066,
-      "meanLatencyPerRequestMs": 2065,
-      "amortisedMsPerAction": 2065.7,
-      "throughputTps": 0.48
+      "wallClockMs": 2061,
+      "meanLatencyPerRequestMs": 2060,
+      "amortisedMsPerAction": 2061.1,
+      "throughputTps": 0.49
     },
     {
       "concurrentSubmissions": 2,
       "succeeded": 2,
       "blocksCut": 1,
       "txPerBlock": 2,
-      "wallClockMs": 2068,
-      "meanLatencyPerRequestMs": 2065,
-      "amortisedMsPerAction": 1034.1,
+      "wallClockMs": 2065,
+      "meanLatencyPerRequestMs": 2063,
+      "amortisedMsPerAction": 1032.6,
       "throughputTps": 0.97
     },
     {
@@ -288,40 +288,40 @@
       "succeeded": 5,
       "blocksCut": 1,
       "txPerBlock": 5,
-      "wallClockMs": 2095,
-      "meanLatencyPerRequestMs": 2091,
-      "amortisedMsPerAction": 418.9,
-      "throughputTps": 2.39
+      "wallClockMs": 2107,
+      "meanLatencyPerRequestMs": 2102,
+      "amortisedMsPerAction": 421.4,
+      "throughputTps": 2.37
     },
     {
       "concurrentSubmissions": 10,
       "succeeded": 10,
       "blocksCut": 1,
       "txPerBlock": 10,
-      "wallClockMs": 2158,
-      "meanLatencyPerRequestMs": 2152,
-      "amortisedMsPerAction": 215.8,
-      "throughputTps": 4.63
+      "wallClockMs": 2131,
+      "meanLatencyPerRequestMs": 2125,
+      "amortisedMsPerAction": 213.1,
+      "throughputTps": 4.69
     },
     {
       "concurrentSubmissions": 20,
       "succeeded": 20,
       "blocksCut": 1,
       "txPerBlock": 20,
-      "wallClockMs": 2189,
-      "meanLatencyPerRequestMs": 2179,
-      "amortisedMsPerAction": 109.4,
-      "throughputTps": 9.14
+      "wallClockMs": 2194,
+      "meanLatencyPerRequestMs": 2182,
+      "amortisedMsPerAction": 109.7,
+      "throughputTps": 9.12
     },
     {
       "concurrentSubmissions": 50,
       "succeeded": 50,
       "blocksCut": 1,
       "txPerBlock": 50,
-      "wallClockMs": 2370,
-      "meanLatencyPerRequestMs": 2349,
-      "amortisedMsPerAction": 47.4,
-      "throughputTps": 21.1
+      "wallClockMs": 2338,
+      "meanLatencyPerRequestMs": 2304,
+      "amortisedMsPerAction": 46.8,
+      "throughputTps": 21.39
     }
   ],
   "costSummary": {
@@ -336,13 +336,13 @@
       "audit": 78,
       "breakglass": 5,
       "grant": 86,
-      "reference": 20,
+      "reference": 50,
       "registration": 98
     },
     "rates": {
-      "lambda_r": 0.046496489515041615,
-      "lambda_g": 0.19993490491467894,
-      "lambda_a": 0.1813363091086623
+      "lambda_r": 0.10239732620101824,
+      "lambda_g": 0.1761234010657514,
+      "lambda_a": 0.15973982887358845
     },
     "actionCostAtCurrentBatch": 22,
     "actionCostCurve": [
@@ -547,13 +547,13 @@
         "cost": 18.8
       }
     ],
-    "ledgerRate": 9.411,
+    "ledgerRate": 9.642,
     "ledgerGrowth": {
-      "bytesPerSecond": 105.73,
-      "baselineBytesPerSecondIfFullRecordOnChain": 2198.08,
-      "reductionFactor": 20.8
+      "bytesPerSecond": 106.66,
+      "baselineBytesPerSecondIfFullRecordOnChain": 4714.54,
+      "reductionFactor": 44.2
     }
   },
-  "finalBlockHeight": 209,
-  "finishedAt": "2026-11-06T10:40:29.653Z"
+  "finalBlockHeight": 239,
+  "finishedAt": "2026-11-14T17:35:56.954Z"
 }

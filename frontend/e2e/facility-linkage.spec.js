@@ -1,134 +1,163 @@
 import { test, expect } from '@playwright/test';
-import { randomUUID } from 'node:crypto';
-import { field, gotoTab, ensureOnline, addLocalPatientRecord } from './utils.js';
+import { AUTH_FRONTEND_URL } from './config.js';
+import {
+  H, tag, field, gotoNav, signIn, lookUpFirstHospital, createHealthId, lookUpFacility, networkPanel, addRosterRecord,
+} from './utils.js';
 
-// Replaces the old MPI-duplicate flow: the patient no longer types in
-// demographics for probabilistic scoring against every other patient.
-// Instead, once they have a DID, they assert a hospital number + date of
-// birth for a *specific* hospital they already have a record at, see the
-// matched name, and explicitly confirm it before anything is linked.
+// Patient-asserted facility linkage. There is no demographic matching: the
+// patient names a hospital, gives the hospital number on their card there
+// and their date of birth, sees the name on that record, and explicitly
+// confirms it. The same check runs before the Health ID (DID) is created
+// at their first hospital, and again for each further hospital they add.
+// A wrong number and a wrong date of birth get the same generic refusal,
+// so the lookup cannot be used to find out which numbers exist.
 //
-// The backend starts with an empty local patient roster (no seeded demo
-// data), so each spec below creates its own fixture record first, either
-// directly via the API (mirroring a hospital's own data migration) or, in
-// the last test, through the actual Admin Dashboard UI -- the same real
-// path a hospital admin would use.
+// The backend starts with no data (DEMO_SEED=off); each test seeds the
+// hospital rosters it needs, via the API or (last test) the admin UI.
+test.use({ baseURL: AUTH_FRONTEND_URL });
+
+const NO_MATCH = 'No matching record found';
+
 test('facility linkage: a wrong hospital number or DOB is refused generically, and a correct one requires explicit confirmation', async ({ page }) => {
-  await ensureOnline();
-
-  const tag = randomUUID().slice(0, 8);
-  const did = `did:patientchain:e2e-link-${tag}`;
-  const hospitalNumber = `IBD-${tag}`;
-  const name = `Test Patient ${tag}`;
+  test.setTimeout(60_000);
+  const t = tag();
   const dob = '1990-04-12';
-  await addLocalPatientRecord('hospital-b', { hospitalNumber, name, dob });
+  const name = `Test Patient ${t}`;
+  const lagNumber = `LAG-${t}`;
+  const pshNumber = `PSH-${t}`;
+  await addRosterRecord(H.langtang.id, { hospitalNumber: lagNumber, name, dob });
+  await addRosterRecord(H.specialist.id, { hospitalNumber: pshNumber, name, dob });
 
-  await page.goto('/');
-  await gotoTab(page, 'Patient App');
+  await signIn(page, { role: 'patient', subject: `patient-link-${t}` });
 
-  await test.step('the patient registers a new DID', async () => {
-    await field(page, 'Patient DID').locator('input').fill(did);
-    await page.getByRole('button', { name: 'Register this DID on-chain' }).click();
-    await expect(page.getByText('Public key')).toBeVisible();
+  await test.step('before a Health ID exists, a wrong date of birth at the first hospital is refused generically', async () => {
+    await lookUpFirstHospital(page, { hospitalName: H.langtang.name, hospitalNumber: lagNumber, dob: '2000-01-01' });
+    await expect(page.locator('.error-banner').first()).toHaveText(NO_MATCH);
+    await expect(page.getByRole('button', { name: 'Yes, create my Health ID' })).toHaveCount(0);
+    await expect(page.getByText('Not yet registered')).toBeVisible();
   });
 
+  await test.step('the right number and date of birth show the name; confirming creates the Health ID', async () => {
+    await createHealthId(page, { hospitalName: H.langtang.name, hospitalNumber: lagNumber, dob, name });
+  });
+
+  await gotoNav(page, 'My Hospitals');
+  await expect(networkPanel(page).getByRole('heading')).toHaveText('My Hospital Network (1)');
+
   await test.step('an incorrect hospital number is refused with a generic error', async () => {
-    await field(page, 'Hospital ID').locator('input').fill('hospital-b');
-    await field(page, 'Hospital number').locator('input').fill('NOT-A-REAL-NUMBER');
-    await field(page, 'Date of birth').locator('input').fill(dob);
-    await page.getByRole('button', { name: 'Look up' }).click();
-    await expect(page.getByText('No matching record found')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Yes' })).toHaveCount(0);
+    await lookUpFacility(page, { search: 'Specialist', hospitalName: H.specialist.name, hospitalNumber: 'NOT-A-REAL-NUMBER', dob });
+    await expect(page.locator('.error-banner')).toHaveText(NO_MATCH);
+    await expect(page.getByRole('button', { name: 'Yes, add to my network' })).toHaveCount(0);
   });
 
   await test.step('a correct hospital number with the wrong date of birth is refused with the exact same error', async () => {
-    await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-    await field(page, 'Date of birth').locator('input').fill('2000-01-01');
-    await page.getByRole('button', { name: 'Look up' }).click();
-    await expect(page.getByText('No matching record found')).toBeVisible();
+    await field(page, 'Your hospital number').locator('input').fill(pshNumber);
+    await field(page, 'Date of birth (for verification)').locator('input').fill('2000-01-01');
+    await page.getByRole('button', { name: 'Verify & Add to Network' }).click();
+    await expect(page.locator('.error-banner')).toHaveText(NO_MATCH);
+    await expect(page.getByRole('button', { name: 'Yes, add to my network' })).toHaveCount(0);
   });
 
-  await test.step('a correct hospital number and date of birth show the matched name for confirmation, without linking yet', async () => {
-    await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-    await field(page, 'Date of birth').locator('input').fill(dob);
-    await page.getByRole('button', { name: 'Look up' }).click();
-    await expect(page.getByText(name)).toBeVisible();
-    await expect(page.getByText('Is this you?')).toBeVisible();
+  await test.step('a correct number and date of birth show the matched name for confirmation, without linking yet', async () => {
+    await field(page, 'Date of birth (for verification)').locator('input').fill(dob);
+    await page.getByRole('button', { name: 'Verify & Add to Network' }).click();
+    await expect(page.getByText('Record found!')).toBeVisible();
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Is this you\? Confirming will add/)).toBeVisible();
+    await expect(networkPanel(page).getByRole('heading')).toHaveText('My Hospital Network (1)');
   });
 
   await test.step('confirming links the facility', async () => {
-    await page.getByRole('button', { name: 'Yes' }).click();
-    await expect(page.locator('.data-row').filter({ hasText: 'hospital-b' })).toBeVisible();
-    await expect(page.getByText(`linked (${hospitalNumber})`)).toBeVisible();
+    await page.getByRole('button', { name: 'Yes, add to my network' }).click();
+    await expect(networkPanel(page).getByRole('heading')).toHaveText('My Hospital Network (2)');
+    await expect(networkPanel(page)).toContainText(H.specialist.name);
+    await expect(networkPanel(page)).toContainText(`Hospital No: ${pshNumber}`);
+    // The link is held by the server, not just this screen.
+    await page.reload();
+    await gotoNav(page, 'My Hospitals');
+    await expect(networkPanel(page)).toContainText(`Hospital No: ${pshNumber}`);
   });
 });
 
 test('facility linkage: saying "No" to a match discards it without linking', async ({ page }) => {
-  await ensureOnline();
-
-  const tag = randomUUID().slice(0, 8);
-  const did = `did:patientchain:e2e-link-reject-${tag}`;
-  const hospitalNumber = `IBD-${tag}`;
-  const name = `Test Patient ${tag}`;
+  test.setTimeout(60_000);
+  const t = tag();
   const dob = '1990-04-12';
-  await addLocalPatientRecord('hospital-b', { hospitalNumber, name, dob });
+  const name = `Test Patient ${t}`;
+  const lagNumber = `LAG-${t}`;
+  const pshNumber = `PSH-${t}`;
+  await addRosterRecord(H.langtang.id, { hospitalNumber: lagNumber, name, dob });
+  await addRosterRecord(H.specialist.id, { hospitalNumber: pshNumber, name, dob });
 
-  await page.goto('/');
-  await gotoTab(page, 'Patient App');
+  await signIn(page, { role: 'patient', subject: `patient-reject-${t}` });
 
-  await field(page, 'Patient DID').locator('input').fill(did);
-  await page.getByRole('button', { name: 'Register this DID on-chain' }).click();
-  await expect(page.getByText('Public key')).toBeVisible();
+  await test.step('"No, that’s not me" at the first hospital creates no Health ID', async () => {
+    await lookUpFirstHospital(page, { hospitalName: H.langtang.name, hospitalNumber: lagNumber, dob });
+    await expect(page.getByText(`Is this you: ${name}?`)).toBeVisible();
+    await page.getByRole('button', { name: 'No, that’s not me' }).click();
+    await expect(page.getByText(`Is this you: ${name}?`)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Yes, create my Health ID' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Find my record' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText('Not yet registered')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Create your Cevruni Health ID' })).toBeVisible();
+  });
 
-  await field(page, 'Hospital ID').locator('input').fill('hospital-b');
-  await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-  await field(page, 'Date of birth').locator('input').fill(dob);
-  await page.getByRole('button', { name: 'Look up' }).click();
-  await expect(page.getByText(name)).toBeVisible();
+  await test.step('the patient then confirms and creates their Health ID', async () => {
+    await createHealthId(page, { hospitalName: H.langtang.name, hospitalNumber: lagNumber, dob, name });
+  });
 
-  await page.getByRole('button', { name: 'No' }).click();
-  await expect(page.getByText('Is this you?')).toHaveCount(0);
-  await expect(page.getByText(`linked (${hospitalNumber})`)).toHaveCount(0);
+  await test.step('"Not me" on a further hospital discards the match without linking', async () => {
+    await gotoNav(page, 'My Hospitals');
+    await lookUpFacility(page, { search: 'Specialist', hospitalName: H.specialist.name, hospitalNumber: pshNumber, dob });
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Not me — cancel' }).click();
+    await expect(page.getByText('Record found!')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Find a Hospital' })).toBeVisible();
+    await expect(networkPanel(page).getByRole('heading')).toHaveText('My Hospital Network (1)');
+    await expect(networkPanel(page)).not.toContainText(pshNumber);
+    await page.reload();
+    await gotoNav(page, 'My Hospitals');
+    await expect(networkPanel(page).getByRole('heading')).toHaveText('My Hospital Network (1)');
+  });
 });
 
-// End-to-end through the real UI on both sides, with no API shortcuts: a
-// hospital admin enters a real patient into their roster via the Admin
-// Dashboard, and that patient links it from the Patient App. This is the
-// exact path a real deployment would use now that no data is pre-seeded.
-test('facility linkage: a record added via the Admin Dashboard is immediately linkable by the patient', async ({ page }) => {
-  await ensureOnline();
-
-  const tag = randomUUID().slice(0, 8);
-  const did = `did:patientchain:e2e-link-admin-${tag}`;
-  const hospitalNumber = `LAG-${tag}`;
-  const name = `Admin-Added Patient ${tag}`;
+// End to end through the real UI on both sides: a hospital admin enters a
+// patient into their hospital's roster from the Admin Dashboard, and that
+// patient adds the hospital to their network from the Patient App.
+test('facility linkage: a record added via the Admin Dashboard is immediately linkable by the patient', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const t = tag();
   const dob = '1988-11-23';
+  const name = `Admin-Added Patient ${t}`;
+  const lagNumber = `LAG-${t}`;
+  const juthNumber = `JUTH-${t}`;
+  await addRosterRecord(H.langtang.id, { hospitalNumber: lagNumber, name, dob });
 
-  await page.goto('/');
-  await gotoTab(page, 'Admin Dashboard');
-
-  await test.step('the admin adds a hospital roster record', async () => {
-    await field(page, 'Hospital ID').locator('input').fill('hospital-a');
-    await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-    await field(page, 'Full name').locator('input').fill(name);
-    await field(page, 'Date of birth').locator('input').fill(dob);
-    await page.getByRole('button', { name: 'Add record' }).click();
-    await expect(page.locator('.data-row').filter({ hasText: hospitalNumber })).toBeVisible();
+  const adminPage = await (await browser.newContext()).newPage();
+  await test.step('the JUTH admin adds a roster record', async () => {
+    await signIn(adminPage, { role: 'hospital_admin', subject: `admin-juth-${t}`, hospitalID: H.juth.id });
+    await gotoNav(adminPage, 'Patient Roster');
+    // The roster form is fixed to the admin's own hospital.
+    await expect(field(adminPage, 'Hospital ID').locator('input')).toHaveValue(H.juth.id);
+    await field(adminPage, 'Hospital number').locator('input').fill(juthNumber);
+    await field(adminPage, 'Full name').locator('input').fill(name);
+    await field(adminPage, 'Date of birth').locator('input').fill(dob);
+    await adminPage.getByRole('button', { name: 'Add record' }).click();
+    await expect(adminPage.locator('.data-row').filter({ hasText: `${name} — ${juthNumber}` })).toContainText(`DOB ${dob}`);
   });
+  await adminPage.context().close();
 
+  const page = await (await browser.newContext()).newPage();
   await test.step('the patient links it straight away', async () => {
-    await gotoTab(page, 'Patient App');
-    await field(page, 'Patient DID').locator('input').fill(did);
-    await page.getByRole('button', { name: 'Register this DID on-chain' }).click();
-    await expect(page.getByText('Public key')).toBeVisible();
-
-    await field(page, 'Hospital ID').locator('input').fill('hospital-a');
-    await field(page, 'Hospital number').locator('input').fill(hospitalNumber);
-    await field(page, 'Date of birth').locator('input').fill(dob);
-    await page.getByRole('button', { name: 'Look up' }).click();
-    await expect(page.getByText(name)).toBeVisible();
-
-    await page.getByRole('button', { name: 'Yes' }).click();
-    await expect(page.getByText(`linked (${hospitalNumber})`)).toBeVisible();
+    await signIn(page, { role: 'patient', subject: `patient-admin-${t}` });
+    await createHealthId(page, { hospitalName: H.langtang.name, hospitalNumber: lagNumber, dob, name });
+    await gotoNav(page, 'My Hospitals');
+    await lookUpFacility(page, { search: 'JUTH', hospitalName: H.juth.name, hospitalNumber: juthNumber, dob });
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Yes, add to my network' }).click();
+    await expect(networkPanel(page)).toContainText(H.juth.name);
+    await expect(networkPanel(page)).toContainText(`Hospital No: ${juthNumber}`);
   });
+  await page.context().close();
 });

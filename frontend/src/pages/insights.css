@@ -1,0 +1,85 @@
+/* Insights (System Admin) and the clinician's diagnosis tagger */
+
+.ins-tabs { margin: 0 0 16px; }
+.ins-tabs button { padding: 8px 14px; font-size: 13px; }
+.ins-badge {
+  display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 999px;
+  background: var(--rust); color: #fff; font-size: 11px; line-height: 18px; text-align: center;
+}
+
+.ins-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.ins-tile h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); margin: 0 0 6px; }
+.ins-tile .stat-value { margin: 0 0 4px; }
+.ins-tile p:last-child { font-size: 12px; color: var(--ink-soft); margin: 0; }
+.ins-tile.warn .stat-value { color: #b45309; }
+
+.ins-chart { width: 100%; }
+.ins-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 18px; }
+.ins-grid .panel { padding: 18px 20px; }
+.panel-head h3 { margin: 2px 0 0; font-size: 16px; }
+
+.ins-barlist ul { list-style: none; margin: 0; padding: 0; }
+.ins-barlist li { margin: 0 0 10px; }
+.ins-bar-label { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink); margin-bottom: 4px; }
+.ins-bar-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-bar-label strong { font-variant-numeric: tabular-nums; }
+.ins-bar-track { height: 6px; background: var(--parchment); border-radius: 4px; overflow: hidden; }
+.ins-bar { display: block; height: 100%; min-width: 3px; background: var(--brand-blue); border-radius: 0 4px 4px 0; }
+
+.ins-hbars { list-style: none; margin: 0; padding: 0; }
+.ins-hbars li { display: grid; grid-template-columns: minmax(140px, 34%) 1fr 48px; align-items: center; gap: 12px; padding: 5px 0; font-size: 13px; }
+.ins-hbar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.ins-hbar-track { height: 14px; display: block; }
+.ins-hbars strong { text-align: right; font-variant-numeric: tabular-nums; }
+
+.ins-privacy { margin-bottom: 18px; font-size: 13px; }
+.admin-table th.num, .admin-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ins-spark { display: flex; align-items: flex-end; gap: 2px; height: 24px; }
+.ins-spark span { width: 7px; background: var(--brand-blue); border-radius: 2px 2px 0 0; }
+.ins-spark span.sup { background: var(--line); }
+.ins-detail td { background: var(--parchment); }
+.ins-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px; }
+.ins-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
+
+.ins-queue { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
+.ins-term { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.ins-term-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.ins-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.ins-map-form { display: grid; grid-template-columns: 160px 1fr auto; gap: 8px; margin-top: 10px; }
+.ins-map-form input { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: 13px var(--font-ui); }
+.ins-map-form input.mono { font-family: var(--font-data); }
+
+.ins-interval-default { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 14px; font-size: 13px; }
+.ins-interval-default input, .ins-days { width: 110px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; font: 13px var(--font-ui); }
+
+/* Clinician: tag diagnoses after opening records */
+.dx-tagger { margin: 14px 0 4px; padding: 14px 16px; border: 1px dashed var(--line); border-radius: var(--radius); background: #fafbfe; }
+.dx-tagger-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dx-tagger-head strong { font-size: 14px; }
+.dx-search { position: relative; margin-top: 10px; }
+.dx-search input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: 13px var(--font-ui); background: #fff; }
+.dx-results { list-style: none; margin: 4px 0 0; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow-card); max-height: 260px; overflow: auto; }
+.dx-results li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.dx-results li:hover, .dx-results li.active { background: var(--brand-gradient-subtle); }
+.dx-results .dx-code { font-family: var(--font-data); font-size: 12px; color: var(--brand-blue); min-width: 70px; }
+.dx-results li.blocked { opacity: .55; cursor: not-allowed; }
+.dx-noted { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 12px; }
+.dx-note { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--sage-bg); color: #047857; font-weight: 600; }
+.dx-note.old { background: var(--parchment); color: var(--ink-soft); }
+.dx-note button { border: 1px solid currentColor; background: #fff; color: inherit; border-radius: 999px; font: 600 11px var(--font-ui); padding: 1px 8px; cursor: pointer; }
+.dx-suggested button:disabled { opacity: .5; cursor: not-allowed; }
+.dx-results .dx-add { color: var(--brand-purple); font-weight: 600; }
+.dx-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.dx-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 600; }
+.dx-chip.local { background: #f5f3ff; color: #6d28d9; }
+.dx-chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+.dx-suggested { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 12px; }
+.dx-suggested button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 3px 10px; font: 12px var(--font-ui); cursor: pointer; }
+.dx-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.dx-done { color: #047857; font-size: 13px; font-weight: 600; }
+
+@media (max-width: 640px) {
+  .ins-hbars li { grid-template-columns: 1fr 40px; }
+  .ins-hbar-track { grid-column: 1 / -1; grid-row: 2; }
+  .ins-map-form { grid-template-columns: 1fr; }
+}

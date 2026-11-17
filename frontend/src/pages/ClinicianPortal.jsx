@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { useSession } from '../auth';
 import { api } from '../api';
+import { DiagnosisTagger } from '../components/DiagnosisTagger';
 import { useLedgerEvents } from '../ledgerEvents';
 import './viewRecords.css';
+import '../components/emergencyCode.css';
 import { useScreenCaptureSubject } from '../components/screenCaptureAudit';
 
 // Record-type categories a clinician can ask for (Table 3.6). The grant
@@ -213,8 +215,11 @@ const EMPTY_REP = { name: '', relationship: '', phone: '' };
  * reason up to 24 hours; seen by both hospitals' admins and the patient.
  */
 function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
+  const [mode, setMode] = useState('code'); // code | number
   const [target, setTarget] = useState('');
   const [number, setNumber] = useState('');
+  const [code, setCode] = useState('');
+  const [found, setFound] = useState(null); // emergency-code lookup result
   const [justification, setJustification] = useState('');
   const [rep, setRep] = useState(EMPTY_REP);
   const [result, setResult] = useState(null);
@@ -222,14 +227,40 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
   const [busy, setBusy] = useState(false);
   const others = hospitals.filter((h) => h.hospitalID !== hospitalID);
 
+  function switchMode(m) {
+    setMode(m);
+    setTarget('');
+    setFound(null);
+    setError(null);
+  }
+
+  async function lookup() {
+    setBusy(true);
+    setError(null);
+    setFound(null);
+    setTarget('');
+    try {
+      const r = await api.lookupEmergencyCode(code.trim());
+      setFound(r);
+      if (r.hospitals.length === 1 && r.requesterInNetwork) setTarget(r.hospitals[0].hospitalID);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       const representative = rep.name || rep.relationship || rep.phone ? rep : undefined;
-      setResult(await api.requestBreakGlass({ hospitalID: target, hospitalNumber: number.trim(), justification: justification.trim(), representative }));
+      const who = mode === 'code' ? { emergencyCode: code.trim() } : { hospitalNumber: number.trim() };
+      setResult(await api.requestBreakGlass({ hospitalID: target, ...who, justification: justification.trim(), representative }));
       setNumber('');
+      setCode('');
+      setFound(null);
       setJustification('');
       setRep(EMPTY_REP);
     } catch (err) {
@@ -238,6 +269,8 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
       setBusy(false);
     }
   }
+
+  const ready = target && justification.trim() && (mode === 'code' ? found && found.requesterInNetwork : number.trim());
 
   return (
     <div>
@@ -269,18 +302,67 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
       {!result && (
         <form className="panel" onSubmit={submit}>
           {error && <div className="error-banner">{error}</div>}
+          <div className="field">
+            <label>How will you find the patient?</label>
+            <div className="role-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={mode === 'code'} className={mode === 'code' ? 'active' : ''} onClick={() => switchMode('code')}>Emergency code</button>
+              <button type="button" role="tab" aria-selected={mode === 'number'} className={mode === 'number' ? 'active' : ''} onClick={() => switchMode('number')}>Hospital number</button>
+            </div>
+          </div>
+
+          {mode === 'code' ? (
+            <>
+              <div className="form-grid">
+                <div className="field">
+                  <label>Patient’s emergency code</label>
+                  <div className="ec-lookup">
+                    <input className="ec-input" value={code} onChange={(e) => { setCode(e.target.value.toUpperCase().replace(/[\s-]/g, '').slice(0, 7)); setFound(null); setTarget(''); }}
+                      placeholder="7 characters, e.g. K7M4QX9" autoComplete="off" spellCheck={false} />
+                    <button type="button" className="btn btn-primary" disabled={busy || code.replace(/[\s-]/g, '').length !== 7} onClick={lookup}>Find hospitals</button>
+                  </div>
+                  <p className="hint" style={{ margin: '6px 0 0' }}>From the family, the patient’s phone or their printed card. Each lookup is recorded on the patient’s audit trail; repeated wrong codes lock you out for 15 minutes.</p>
+                </div>
+              </div>
+              {found && (
+                <div className="ec-found">
+                  <div className="ec-found-name">{found.patientName || 'Patient'}</div>
+                  {!found.requesterInNetwork ? (
+                    <div className="inline-warn">{found.notice}</div>
+                  ) : found.hospitals.length === 0 ? (
+                    <div className="inline-warn">This patient has no other hospitals in their network.</div>
+                  ) : (
+                    <>
+                      <div className="hint">Choose the hospital whose records you need:</div>
+                      <div className="ec-hospitals">
+                        {found.hospitals.map((h) => (
+                          <label key={h.hospitalID} className={`ec-hospital ${target === h.hospitalID ? 'selected' : ''}`}>
+                            <input type="radio" name="ec-hospital" value={h.hospitalID} checked={target === h.hospitalID} onChange={() => setTarget(h.hospitalID)} />
+                            {h.name}
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="form-grid">
+              <div className="field">
+                <label>Hospital holding the records</label>
+                <select value={target} onChange={(e) => setTarget(e.target.value)} required>
+                  <option value="">Select hospital…</option>
+                  {others.map((h) => <option key={h.hospitalID} value={h.hospitalID}>{h.name}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Patient’s hospital number there</label>
+                <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="e.g. from the family or the patient’s card" required />
+              </div>
+            </div>
+          )}
+
           <div className="form-grid">
-            <div className="field">
-              <label>Hospital holding the records</label>
-              <select value={target} onChange={(e) => setTarget(e.target.value)} required>
-                <option value="">Select hospital…</option>
-                {others.map((h) => <option key={h.hospitalID} value={h.hospitalID}>{h.name}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label>Patient’s hospital number there</label>
-              <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="e.g. from the family or the patient’s card" required />
-            </div>
             <div className="field span-2">
               <label>Why is this needed now?</label>
               <textarea rows={3} value={justification} onChange={(e) => setJustification(e.target.value)} required
@@ -289,7 +371,7 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
           </div>
           <fieldset className="config-block">
             <legend>Who asked? <span className="optional">optional</span></legend>
-            <p className="hint" style={{ marginTop: 0 }}>The family member or representative who gave the number (National Health Act 2014 s.26(2)(d)). Stored encrypted, off the blockchain.</p>
+            <p className="hint" style={{ marginTop: 0 }}>The family member or representative who gave the {mode === 'code' ? 'code' : 'number'} (National Health Act 2014 s.26(2)(d)). Stored encrypted, off the blockchain.</p>
             <div className="form-grid three">
               <div className="field"><label>Name</label><input value={rep.name} onChange={(e) => setRep({ ...rep, name: e.target.value })} /></div>
               <div className="field"><label>Relationship</label><input value={rep.relationship} onChange={(e) => setRep({ ...rep, relationship: e.target.value })} placeholder="e.g. Husband" /></div>
@@ -297,7 +379,7 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
             </div>
           </fieldset>
           <p className="hint">Works only if the patient has added both {hospitalName} and that hospital to their Cevruni network. If not, treat with the information available; your duty to treat is unchanged.</p>
-          <button className="btn btn-danger-solid" disabled={busy || !target || !number.trim() || !justification.trim()}>
+          <button className="btn btn-danger-solid" disabled={busy || !ready}>
             {busy ? 'Opening…' : 'Open emergency access'}
           </button>
         </form>
@@ -574,6 +656,10 @@ function MyGrants({ hospitalName }) {
                         {res.withheld > 0 && <span className="vr-note">{'\u{1F512}'} {res.withheld} record{res.withheld === 1 ? '' : 's'} outside this grant’s record types withheld</span>}
                         <span className="vr-note">{'✓'} Access verified on the blockchain and logged</span>
                       </div>
+                      <DiagnosisTagger
+                        grantID={g.grantID}
+                        conditionTexts={entries.filter((e) => e.r.resourceType === 'Condition').map((e) => e.r.code?.text || e.r.code?.coding?.[0]?.display).filter(Boolean)}
+                      />
                       {visible.length === 0 && <p className="hint">No records of the granted types at this hospital.</p>}
                       <div className="vr-records">
                         {visible.map(({ bundle, r, key }) => {

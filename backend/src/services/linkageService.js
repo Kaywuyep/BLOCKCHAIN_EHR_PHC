@@ -27,6 +27,9 @@ class LinkageService {
     this.fhirAdapter = fhirAdapter;
     this.maxAttempts = options.maxAttempts || 5;
     this.attemptWindowMs = options.attemptWindowMs || 15 * 60 * 1000;
+    // A confirmed match must be acted on soon: after this it expires, so a
+    // match the patient answered "No" to cannot be confirmed later.
+    this.pendingTtlMs = options.pendingTtlMs || 15 * 60 * 1000;
 
     // patientDID -> { count, windowStart } -- a second layer against
     // hospital-number enumeration, on top of the generic error message
@@ -80,7 +83,7 @@ class LinkageService {
       throw new Error('No matching record found');
     }
 
-    this.pendingLinks.set(`${patientDID}::${hospitalID}`, hospitalNumber);
+    this.pendingLinks.set(`${patientDID}::${hospitalID}`, { hospitalNumber, at: Date.now() });
     return { name: record.name };
   }
 
@@ -95,9 +98,20 @@ class LinkageService {
    * patient had a DID, under a provisional key. Consumes that pending
    * match; returns true if it was there.
    */
+  /** The pending match for key if it is for hospitalNumber and not expired. */
+  _pendingMatches(key, hospitalNumber) {
+    const pending = this.pendingLinks.get(key);
+    if (!pending) return false;
+    if (Date.now() - pending.at > this.pendingTtlMs) {
+      this.pendingLinks.delete(key);
+      return false;
+    }
+    return pending.hospitalNumber === hospitalNumber;
+  }
+
   consumePending(provisionalID, hospitalID, hospitalNumber) {
     const key = `${provisionalID}::${hospitalID}`;
-    if (this.pendingLinks.get(key) !== hospitalNumber) return false;
+    if (!this._pendingMatches(key, hospitalNumber)) return false;
     this.pendingLinks.delete(key);
     return true;
   }
@@ -108,7 +122,7 @@ class LinkageService {
     }
 
     const key = `${patientDID}::${hospitalID}`;
-    if (this.pendingLinks.get(key) !== hospitalNumber) {
+    if (!this._pendingMatches(key, hospitalNumber)) {
       throw new Error('no confirmed match pending for that hospital number -- look it up again first');
     }
     this.pendingLinks.delete(key);

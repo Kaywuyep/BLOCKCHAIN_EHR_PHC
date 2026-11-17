@@ -35,6 +35,8 @@ const EVENT_LABELS = {
   CROSS_HOSPITAL_GRANT: 'Patient shared records across hospitals',
   SCREEN_CAPTURE_ATTEMPT: 'Screenshot attempt',
   BREAK_GLASS_EXTENDED: 'Emergency access extended',
+  EMERGENCY_CODE_USED: 'Emergency code used',
+  EMERGENCY_CODE_REPLACED: 'Emergency code replaced',
 };
 
 const CLINICAL_ROLES = ['Physician', 'Consultant', 'Nurse', 'Laboratory Scientist', 'Pharmacist', 'Radiographer', 'Medical Records Officer'];

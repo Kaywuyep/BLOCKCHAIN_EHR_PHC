@@ -1,0 +1,20 @@
+/* Patient emergency code (Health ID page) and clinician lookup */
+.ec-card { border-left: 4px solid var(--rust); }
+.ec-code-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0 6px; }
+.ec-code { font: 700 30px var(--font-data); letter-spacing: .18em; color: var(--ink); background: var(--parchment); padding: 8px 16px; border-radius: var(--radius); }
+.ec-code.hidden { color: var(--ink-soft); letter-spacing: .3em; }
+.ec-uses { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.ec-uses li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.ec-uses li:last-child { border-bottom: none; }
+.ec-lookup { display: flex; gap: 8px; }
+.ec-input { font: 600 18px var(--font-data); letter-spacing: .15em; text-transform: uppercase; flex: 1; min-width: 0; }
+.ec-found { margin: 4px 0 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafbfe; }
+.ec-found-name { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+.ec-hospitals { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.ec-hospital { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; cursor: pointer; font-size: 14px; }
+.ec-hospital.selected { border-color: var(--rust); background: var(--rust-bg); }
+@media print {
+  body * { visibility: hidden; }
+  .ec-print, .ec-print * { visibility: visible; }
+  .ec-print { position: absolute; left: 0; top: 0; }
+}

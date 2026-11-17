@@ -1,0 +1,10 @@
+node scripts/page-sweep.cjs  (frontend on the Fabric-backed backend, 14 November 2026)
+
+ok   Super Admin: 13 pages
+ok   Langtang Hospital Admin: 12 pages
+ok   Dr. Musa (Langtang): 3 pages
+ok   Dr. Bello (JUTH): 3 pages
+ok   Sani, Lab Scientist: 3 pages
+ok   Amina (Patient): 5 pages
+ok   Ibrahim (Patient): 5 pages
+no UI errors

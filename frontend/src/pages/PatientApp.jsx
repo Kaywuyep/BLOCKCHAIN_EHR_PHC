@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { api } from '../api';
+import { EmergencyCodeCard } from '../components/EmergencyCodeCard';
 import { useSession } from '../auth';
 import './admin.css';
 import { LedgerStrip } from '../components/LedgerStrip';
@@ -396,6 +397,8 @@ export function PatientApp() {
               <p>Awaiting your approval</p>
             </div>
           </div>
+
+          {patient && <EmergencyCodeCard patientDID={patientDID} />}
 
           {!patient ? (
             <div className="panel">

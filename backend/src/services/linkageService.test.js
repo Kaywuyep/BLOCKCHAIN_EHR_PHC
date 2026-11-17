@@ -95,3 +95,17 @@ test('rate limiting is per patient, not global', () => {
   assert.throws(() => svc.linkFacility('did:patientchain:p1', 'HospitalB-Ibadan', 'IBD-77410', '1990-04-12'), /too many lookup attempts/);
   assert.doesNotThrow(() => svc.linkFacility('did:patientchain:p2', 'HospitalB-Ibadan', 'IBD-77410', '1990-04-12'));
 });
+
+test('a confirmed match expires, so a match the patient answered "No" to cannot be confirmed later', () => {
+  const svc = new LinkageService(seeded(), { pendingTtlMs: 1000 });
+  const realNow = Date.now;
+  try {
+    svc.linkFacility('did:patientchain:p1', 'HospitalB-Ibadan', 'IBD-77410', '1990-04-12');
+    const t0 = realNow();
+    Date.now = () => t0 + 1001;
+    assert.throws(() => svc.confirmLink('did:patientchain:p1', 'HospitalB-Ibadan', 'IBD-77410'), /no confirmed match pending/);
+    assert.equal(svc.consumePending('did:patientchain:p1', 'HospitalB-Ibadan', 'IBD-77410'), false);
+  } finally {
+    Date.now = realNow;
+  }
+});

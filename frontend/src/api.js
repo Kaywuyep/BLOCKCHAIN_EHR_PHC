@@ -66,6 +66,9 @@ export const api = {
   getEmergencyDetails: (grantID) => request(`/access/${grantID}/emergency-details`),
   getMyGrantsForPatient: (did) => request(`/access/my-grants/${encodeURIComponent(did)}`),
   requestBreakGlass: (data) => request('/access/break-glass', { method: 'POST', body: JSON.stringify(data) }),
+  lookupEmergencyCode: (code) => request('/access/emergency-code/lookup', { method: 'POST', body: JSON.stringify({ code }) }),
+  getEmergencyCode: (did) => request(`/access/emergency-code/${encodeURIComponent(did)}`),
+  regenerateEmergencyCode: (did) => request(`/access/emergency-code/${encodeURIComponent(did)}/regenerate`, { method: 'POST', body: '{}' }),
   reviewBreakGlass: (grantID, data) =>
     request(`/access/${grantID}/review`, { method: 'POST', body: JSON.stringify(data) }),
   getPendingBreakGlass: () => request('/access/break-glass/pending'),
@@ -108,6 +111,24 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request(`/cost/summary${qs ? `?${qs}` : ''}`);
   },
+
+  // Diagnosis catalogue (ICD-10 + local terms) and tagging after a record view
+  searchDiagnoses: (q, limit = 8) => request(`/diagnoses/search?${new URLSearchParams({ q, limit })}`),
+  addDiagnosisTerm: (term) => request('/diagnoses/terms', { method: 'POST', body: JSON.stringify({ term }) }),
+  tagDiagnoses: (grantID, codes) => request('/diagnoses/tags', { method: 'POST', body: JSON.stringify({ grantID, codes }) }),
+  getDiagnosisNotes: (grantID) => request(`/diagnoses/notes?${new URLSearchParams({ grantID })}`),
+  undoDiagnosis: (grantID, code) => request(`/diagnoses/tags/${encodeURIComponent(code)}?${new URLSearchParams({ grantID })}`, { method: 'DELETE' }),
+
+  // System admin: Insights
+  insightsAccess: (params = {}) => request(`/insights/access?${new URLSearchParams(params)}`),
+  insightsDiagnoses: (params = {}) =>
+    request(`/insights/diagnoses?${new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)))}`),
+  insightsPendingTerms: () => request('/insights/terms/pending'),
+  insightsIntervals: (q = '') => request(`/insights/intervals${q ? `?${new URLSearchParams({ q })}` : ''}`),
+  insightsSetDefaultInterval: (days) => request('/insights/intervals/default', { method: 'PUT', body: JSON.stringify({ days }) }),
+  insightsSetInterval: (code, days) => request(`/insights/intervals/${encodeURIComponent(code)}`, { method: 'PUT', body: JSON.stringify({ days }) }),
+  insightsMapTerm: (code, data) => request(`/insights/terms/${encodeURIComponent(code)}/map`, { method: 'POST', body: JSON.stringify(data) }),
+  insightsRejectTerm: (code) => request(`/insights/terms/${encodeURIComponent(code)}/reject`, { method: 'POST', body: '{}' }),
 
   getSyncStatus: () => request('/sync/status'),
   setConnectivity: (connected) => request('/sync/connectivity', { method: 'POST', body: JSON.stringify({ connected }) }),

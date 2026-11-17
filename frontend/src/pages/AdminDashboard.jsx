@@ -9,6 +9,7 @@ import { useLedgerEvents } from '../ledgerEvents';
 import './admin.css';
 import { HospitalSetup } from './HospitalSetup';
 import { UserDirectory } from './UserDirectory';
+import { Insights } from './Insights';
 import { HospitalScope, HospitalOverview, AccessLog, HospitalGrants, Clinicians, HospitalPatients } from './HospitalAdminView';
 import { LedgerStrip } from '../components/LedgerStrip';
 
@@ -145,6 +146,7 @@ export function AdminDashboard() {
         </div>
       )} />
 
+      <Route path="insights" element={isSystemAdmin ? <Insights /> : <div className="error-banner">Only system admins can see Insights.</div>} />
       <Route path="users" element={isSystemAdmin ? <UserDirectory /> : <div className="error-banner">Only system admins can manage users.</div>} />
 
       <Route path="hospitals" element={isSystemAdmin ? <HospitalSetup /> : (

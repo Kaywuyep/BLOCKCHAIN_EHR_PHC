@@ -82,10 +82,10 @@ const ROSTER = [
 
 // Demo patients: their Health ID and the hospitals already linked.
 const PATIENTS = [
-  { subject: 'amina', did: 'did:patientchain:demo-amina', links: [[L, '536728'], [W, '2367941'], [J, '10045321'], [P, 'PSH-4420']] },
-  { subject: 'ibrahim', did: 'did:patientchain:demo-ibrahim', links: [[L, '104892'], [J, '10087654']] },
-  { subject: 'fatima', did: 'did:patientchain:demo-fatima', links: [[W, '887412'], [O, 'OLA-7891']] },
-  { subject: 'chinedu', did: 'did:patientchain:demo-chinedu', links: [[O, 'OLA-1203']] },
+  { subject: 'amina', emergencyCode: 'AMN4K7Q', did: 'did:patientchain:demo-amina', links: [[L, '536728'], [W, '2367941'], [J, '10045321'], [P, 'PSH-4420']] },
+  { subject: 'ibrahim', emergencyCode: 'BRH3X9T', did: 'did:patientchain:demo-ibrahim', links: [[L, '104892'], [J, '10087654']] },
+  { subject: 'fatima', emergencyCode: 'FTM8C2P', did: 'did:patientchain:demo-fatima', links: [[W, '887412'], [O, 'OLA-7891']] },
+  { subject: 'chinedu', emergencyCode: 'CHN5W6R', did: 'did:patientchain:demo-chinedu', links: [[O, 'OLA-1203']] },
 ];
 
 // Clinical records held at each hospital (FHIR R4, every Table 3.6 type).

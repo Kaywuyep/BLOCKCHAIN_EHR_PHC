@@ -19,6 +19,14 @@ const dataDir = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `patientchain-e2
 // each other under parallel workers. Rather than special-case those
 // tests, the whole suite runs as a single serial worker -- simple to
 // reason about, and fast enough for a suite this size.
+//
+// Two backend + frontend pairs: AUTH_MODE=off (4410/5273, every request a
+// superuser; used by screen-shield.spec.js) and AUTH_MODE=local
+// (4411/5274; every journey that needs a signed-in patient, clinician or
+// admin -- the Clinician Portal takes its provider and hospital from the
+// session). Both start with DEMO_SEED=off so the only data is what each
+// spec creates; the hospitals come from backend/config (imported into the
+// hospital registry on first start).
 
 export default defineConfig({
   testDir: './e2e',
@@ -39,7 +47,7 @@ export default defineConfig({
       command: 'node src/server.js',
       cwd: '../backend',
       port: BACKEND_PORT,
-      env: { PORT: String(BACKEND_PORT), LEDGER_MODE: 'simulated', AUTH_MODE: 'off', HL7_MLLP_ENABLED: 'false', RATE_LIMIT_PER_MINUTE: '0', DATA_DIR: dataDir('open') },
+      env: { PORT: String(BACKEND_PORT), LEDGER_MODE: 'simulated', AUTH_MODE: 'off', DEMO_SEED: 'off', HL7_MLLP_ENABLED: 'false', RATE_LIMIT_PER_MINUTE: '0', DATA_DIR: dataDir('open') },
       reuseExistingServer: false,
       timeout: 30_000,
       stdout: 'pipe',
@@ -63,6 +71,7 @@ export default defineConfig({
         PORT: String(AUTH_BACKEND_PORT),
         LEDGER_MODE: 'simulated',
         AUTH_MODE: 'local',
+        DEMO_SEED: 'off',
         AUTH_JWT_SECRET: 'e2e-only-secret-e2e-only-secret-1234',
         HL7_MLLP_ENABLED: 'false',
         RATE_LIMIT_PER_MINUTE: '0',

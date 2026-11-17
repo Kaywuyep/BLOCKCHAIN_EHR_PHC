@@ -19,6 +19,8 @@ const { adminRouter } = require('./routes/admin');
 const { ingestRouter } = require('./routes/ingest');
 const { eventsRouter } = require('./routes/events');
 const { hospitalAdminRouter } = require('./routes/hospitalAdmin');
+const { diagnosesRouter, insightsRouter } = require('./routes/insights');
+const { DiagnosisInsights } = require('./services/diagnosisInsights');
 const { ALL_ROLES } = require('./auth/auth');
 const { createMetrics } = require('./metrics');
 
@@ -52,6 +54,7 @@ function createApp({
   referenceService = null,
   demoFhir = false,
   cipher = null,
+  diagnoses = null,
   startedAt = Date.now(),
 }) {
   const app = express();
@@ -264,6 +267,13 @@ function createApp({
   app.use('/api/ingest', ingestRouter(fhirAdapter, hospitalRegistry));
   app.use('/api/events', eventsRouter(ledgerPromise));
   app.use('/api/hospital-admin', hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, db, cipher }));
+  // Diagnosis catalogue + anonymous counts (Insights). Keyed hashes use a
+  // key derived from the field-encryption key.
+  const diagnosisStore = diagnoses || (db ? new DiagnosisInsights({ db, hashKey: cipher ? cipher.keys.get(cipher.activeKid) : null }) : null);
+  if (diagnosisStore) {
+    app.use('/api/diagnoses', diagnosesRouter({ diagnoses: diagnosisStore, ledgerPromise, providerRegistry }));
+    app.use('/api/insights', insightsRouter({ diagnoses: diagnosisStore, ledgerPromise, hospitalRegistry }));
+  }
   if (hospitalRegistry && userDirectory && listenerManager) {
     app.use('/api/admin', adminRouter({ registry: hospitalRegistry, users: userDirectory, listenerManager }));
   }
