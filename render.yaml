@@ -1,0 +1,53 @@
+# Render Blueprint: Cevruni DEMO (simulated ledger + demo data).
+# Not for real patients: no Fabric, no encryption at rest, no passwords.
+#
+# Deploy: Render dashboard → New → Blueprint → pick this repo.
+# The free backend has no disk, so the demo resets to its seeded state on
+# every restart or deploy, and it sleeps after 15 min idle (first request
+# then takes ~1 min). Sign-in users are listed in docs/demo-guide.md.
+
+services:
+  # ── Backend API ─────────────────────────────────────────────────────
+  # Native Node runtime rather than backend/Dockerfile: that image sets
+  # NODE_ENV=production (which refuses the simulated ledger) and doesn't
+  # copy config/hospitalDirectory.json.
+  - type: web
+    name: cevruni-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22" # better-sqlite3 does not build on newer Node
+      - key: LEDGER_MODE
+        value: simulated
+      - key: AUTH_MODE
+        value: local # demo sign-in by user ID + role, no passwords
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      - key: DEMO_SEED
+        value: "on"
+      - key: HL7_MLLP_ENABLED
+        value: "false" # Render only exposes HTTP(S); HL7 over HTTPS still works
+      - key: TRUST_PROXY
+        value: "1" # Render terminates HTTPS in front of the app
+
+  # ── Frontend (static) ───────────────────────────────────────────────
+  - type: web
+    name: cevruni
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      # If Render gives the backend a different URL (name taken), change
+      # this to it and redeploy the frontend.
+      - key: VITE_API_BASE
+        value: https://cevruni-api.onrender.com/api
+    routes:
+      - type: rewrite # React Router: serve index.html for every path
+        source: /*
+        destination: /index.html
