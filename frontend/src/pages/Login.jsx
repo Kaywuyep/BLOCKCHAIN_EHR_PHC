@@ -89,7 +89,9 @@ export function Login({ authConfig, onLoggedIn }) {
             <span className="login-brand-name">Cevruni</span>
           </div>
 
-          <h2 className="login-heading">Welcome back</h2>
+          <h2 className="login-heading">
+            Welcome back <span className="login-wave" aria-hidden="true">&#x1F44B;</span>
+          </h2>
           <p className="login-sub">Sign in to your account to continue</p>
 
           {error && <div className="login-error">{error}</div>}
@@ -159,35 +161,65 @@ export function Login({ authConfig, onLoggedIn }) {
   );
 }
 
+const HERO_FEATURES = [
+  {
+    title: 'Blockchain-secured',
+    text: 'Every access is immutably recorded on-chain',
+    icon: (
+      <>
+        <rect x="5" y="11" width="14" height="10" rx="2" />
+        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      </>
+    ),
+  },
+  {
+    title: 'Multi-hospital',
+    text: 'One identity across all your healthcare providers',
+    icon: (
+      <>
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="M12 7v6M9 10h6M10 21v-4h4v4" />
+      </>
+    ),
+  },
+  {
+    title: 'Patient-controlled',
+    text: 'You decide who sees your records and for how long',
+    icon: (
+      <>
+        <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+        <path d="M9 12l2 2 4-4" />
+      </>
+    ),
+  },
+];
+
 function LoginHero() {
   return (
     <div className="login-left">
       <div className="login-left-content">
-        <img src="/Cevruni Health Logo.png" alt="Cevruni Health" className="login-hero-logo" />
-        <p className="login-hero-tagline">Your Health. Your Records. Your Control.</p>
-        <div className="login-hero-features">
-          <div className="login-feature">
-            <span className="login-feature-icon">&#x1F512;</span>
-            <div>
-              <strong>Blockchain-secured</strong>
-              <p>Every access is immutably recorded on-chain</p>
-            </div>
-          </div>
-          <div className="login-feature">
-            <span className="login-feature-icon">&#x1F3E5;</span>
-            <div>
-              <strong>Multi-hospital</strong>
-              <p>One identity across all your healthcare providers</p>
-            </div>
-          </div>
-          <div className="login-feature">
-            <span className="login-feature-icon">&#x1F6E1;</span>
-            <div>
-              <strong>Patient-controlled</strong>
-              <p>You decide who sees your records and for how long</p>
-            </div>
-          </div>
+        <div className="login-hero-brand">
+          <span className="login-hero-mark">
+            <img src="/icon-192.png" alt="" />
+          </span>
+          <span className="login-hero-name">Cevruni</span>
         </div>
+        <p className="login-hero-tagline">Your health. Your records. Your control.</p>
+        <ul className="login-hero-features">
+          {HERO_FEATURES.map((f) => (
+            <li key={f.title} className="login-feature">
+              <span className="login-feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {f.icon}
+                </svg>
+              </span>
+              <div>
+                <strong>{f.title}</strong>
+                <p>{f.text}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
@@ -247,6 +279,20 @@ function PasswordLogin({ onLoggedIn }) {
             <img src="/Gradient C Medical App Icon.png" alt="Cevruni" className="login-icon" />
             <span className="login-brand-name">Cevruni</span>
           </div>
+
+          {tab === 'signin' ? (
+            <>
+              <h2 className="login-heading">
+                Welcome back <span className="login-wave" aria-hidden="true">&#x1F44B;</span>
+              </h2>
+              <p className="login-sub">Sign in to your account to continue</p>
+            </>
+          ) : (
+            <>
+              <h2 className="login-heading">Create your account</h2>
+              <p className="login-sub">Patients sign up here; staff accounts come from their hospital</p>
+            </>
+          )}
 
           <div className="login-tabs" role="tablist">
             <button role="tab" aria-selected={tab === 'signin'} className={tab === 'signin' ? 'active' : ''} onClick={() => { setTab('signin'); setError(null); }}>

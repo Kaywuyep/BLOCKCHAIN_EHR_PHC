@@ -45,6 +45,8 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
+      - key: NODE_VERSION
+        value: "22" # Vite 8 needs Node 20.19+ / 22.12+ to build
       # If Render gives the backend a different URL (name taken), change
       # this to it and redeploy the frontend.
       - key: VITE_API_BASE
