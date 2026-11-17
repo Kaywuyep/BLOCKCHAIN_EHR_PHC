@@ -15,17 +15,34 @@ const smartClinic = require('./smartClinicClient');
  * Failures are silent to the patient: if the EMR is unreachable the check
  * falls back to the roster already held, and the answer stays the same
  * generic "no matching record" either way.
+ *
+ * The patient waits at most EMR_PATIENT_LOOKUP_TIMEOUT_MS (default 10 s) for
+ * the EMR, much less than the 45 s staff tools allow, so an unreachable
+ * hospital network does not keep them on a spinner. A call still in flight
+ * carries on in the background, so a slow SmartClinic login is cached for
+ * the next try.
  */
-async function refreshFromEmr({ hospitalRegistry, fhirAdapter, logger }, hospitalID, hospitalNumber) {
+const LOOKUP_TIMEOUT_MS = Number(process.env.EMR_PATIENT_LOOKUP_TIMEOUT_MS) || 10 * 1000;
+
+function withDeadline(promise, ms, host) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer from ${host} within ${ms / 1000}s`)), ms);
+  });
+  promise.catch(() => {}); // a late failure after the deadline is not unhandled
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+async function refreshFromEmr({ hospitalRegistry, fhirAdapter, logger, timeoutMs = LOOKUP_TIMEOUT_MS }, hospitalID, hospitalNumber) {
   if (!hospitalRegistry || !hospitalID || !hospitalNumber) return false;
   const hospital = hospitalRegistry.getInternal(hospitalID);
   if (!hospital || hospital.status !== 'active') return false;
   try {
     let found = null;
     if (hospital.integration === 'smartclinic' && hospital.smartclinic) {
-      found = await smartClinic.findPatient(hospital, hospitalNumber);
+      found = await withDeadline(smartClinic.findPatient(hospital, hospitalNumber), timeoutMs, 'the hospital\'s SmartClinic');
     } else if (['fhir', 'both'].includes(hospital.integration) && hospital.fhir && hospital.fhir.baseUrl) {
-      found = await findPatientDemographics(hospital, hospitalNumber);
+      found = await withDeadline(findPatientDemographics(hospital, hospitalNumber), timeoutMs, 'the hospital\'s FHIR server');
     } else {
       return false;
     }
