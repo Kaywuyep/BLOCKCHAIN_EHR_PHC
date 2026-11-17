@@ -22,6 +22,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22" # better-sqlite3 does not build on newer Node
+      - key: NODE_ENV
+        value: development # Render defaults Node services to production, which refuses demo settings
       - key: LEDGER_MODE
         value: simulated
       - key: AUTH_MODE
