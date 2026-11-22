@@ -66,7 +66,9 @@ export function Watermark({ session, demo = false }) {
   const identity = useMemo(() => {
     if (!session) return demo ? 'Demo session · not signed in' : null;
     const roles = (session.roles || []).map((r) => ROLE_LABELS[r] || r).join(', ');
-    return [session.sub, roles, session.hospitalID].filter(Boolean).join(' · ');
+    // Names, not IDs: a leaked photo or screenshot shows who took it.
+    const who = session.displayName || session.login || 'Signed-in user';
+    return [who, roles, session.hospitalName].filter(Boolean).join(' · ');
   }, [session, demo]);
 
   const background = identity ? tileUri(identity, `Cevruni · ${formatNow(now)} · Confidential`) : null;

@@ -74,7 +74,15 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
 
   /** A grant with its off-chain emergency notes filled in, for display. */
   function emergencyView(g) {
-    return emergency ? emergency.enrich(g) : g;
+    const out = emergency ? emergency.enrich(g) : g;
+    // The clinician's name and role as their hospital registered them
+    // (off-chain; the ledger only holds the opaque provider ID).
+    if (out && out.providerID && !out.providerID.startsWith(HOSPITAL_STAFF) && providerRegistry) {
+      const p = providerRegistry.get(out.providerID, out.requesterHospitalID) ||
+        (providerRegistry.registrationsOf(out.providerID) || [])[0] || null;
+      if (p) return { ...out, providerName: p.name || null, providerRole: out.providerRole || p.role || null };
+    }
+    return out;
   }
 
   async function audit(ledger, entry) {
@@ -358,8 +366,18 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
       const pending = (await ledger.getPendingBreakGlassReviews()) || [];
       const all = req.user.superuser || isSystemAdmin(req.user);
       const mine = all ? pending : pending.filter((g) => g.hospitalID === req.user.hospitalID || g.requesterHospitalID === req.user.hospitalID);
+      const patientNameAt = (g) => {
+        if (!fhirAdapter) return null;
+        for (const h of [g.hospitalID, g.requesterHospitalID]) {
+          const link = fhirAdapter.listLinksForPatient(g.patientDID).find((l) => l.hospitalID === h);
+          const rec = link ? fhirAdapter.findLocalPatientRecord(link.hospitalID, link.hospitalNumber) : null;
+          if (rec && rec.name) return rec.name;
+        }
+        return null;
+      };
       res.json(mine.map((g) => ({
         ...emergencyView(g),
+        patientName: patientNameAt(g),
         recordsAtName: hospitalName(g.hospitalID),
         viewedFromName: hospitalName(g.requesterHospitalID),
         direction: g.hospitalID === req.user.hospitalID ? 'our-records' : g.requesterHospitalID === req.user.hospitalID ? 'our-clinician' : null,
@@ -398,6 +416,49 @@ function accessRouter(ledgerPromise, offlineQueue, providerRegistry = null, fhir
       await audit(ledger, {
         patientDID, eventType: 'PATIENT_GRANTED_HOSPITAL', actorID: patientDID, hospitalID,
         detail: `Patient shared ${hospitalName(hospitalID)} records with ${hospitalName(viewerHospitalID)} for ${duration} minutes`,
+      });
+      res.status(201).json(grant);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // The patient extends a doctor's (or a hospital's) current access by 24
+  // hours from now. Approvals can't be changed once given, so this is a
+  // fresh approval for the same doctor, hospitals, record types and
+  // purpose, signed by the patient in their app over
+  // "grant:<newGrantID>:1440" like any approval; the audit trail links it
+  // to the approval it extends. body: { grantID (new, client-made), signature }.
+  router.post('/:grantID/patient-extend', async (req, res) => {
+    try {
+      if (!req.user.superuser && !hasRole(req.user, ROLES.PATIENT)) return deny(res, 'only the patient can extend access');
+      const old = await loadGrant(req.params.grantID);
+      if (!old) return res.status(404).json({ error: 'grant not found' });
+      if (!isPatientSelf(req.user, old.patientDID)) return deny(res, 'only the patient can extend access to their records');
+      if (old.grantType === 'BREAK_GLASS') return res.status(400).json({ error: 'emergency access is extended by the clinician with a reason, not here' });
+      if (old.status !== 'ACTIVE' || (old.expiresAt && new Date(old.expiresAt) <= new Date())) {
+        return res.status(409).json({ error: 'this access has already ended; the doctor can ask again' });
+      }
+      const duration = 24 * 60;
+      const grantID = typeof req.body.grantID === 'string' && /^[\w-]{8,64}$/.test(req.body.grantID) ? req.body.grantID : randomUUID();
+      const ledger = await ledgerPromise;
+      await ledger.requestAccess({
+        grantID,
+        patientDID: old.patientDID,
+        providerID: old.providerID,
+        hospitalID: old.hospitalID,
+        scope: Array.isArray(old.scope) ? old.scope : [],
+        purpose: old.purpose || 'Treatment',
+        providerRole: old.providerRole || '',
+        requesterHospitalID: old.requesterHospitalID,
+      });
+      const grant = await ledger.grantAccess({ grantID, durationMinutes: duration, signature: req.body.signature });
+      await audit(ledger, {
+        patientDID: old.patientDID,
+        eventType: 'GRANT_EXTENDED',
+        actorID: old.patientDID,
+        hospitalID: old.hospitalID,
+        detail: `Patient extended access to ${hospitalName(old.hospitalID)} records for ${old.providerID} (${hospitalName(old.requesterHospitalID)}) by 24 hours: approval ${grantID} renews ${old.grantID}${grant.patientSigned ? ' (signed by patient)' : ''}`,
       });
       res.status(201).json(grant);
     } catch (err) {

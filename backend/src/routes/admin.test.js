@@ -119,3 +119,37 @@ test('users list shows every role; non-system-admins are refused; disabled users
     await server.close();
   }
 });
+
+test('"Find and switch on record reading" saves the record sources it finds and keeps the stored password', async () => {
+  const http = require('node:http');
+  const emr = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const send = (j) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+    if (u.pathname === '/') { res.writeHead(200); return res.end('<script src="/js/app.1.js"></script>'); }
+    if (u.pathname === '/js/app.1.js') { res.writeHead(200); return res.end('N.get("/visits/all/get",{params:{search:e.s,currentPage:1}});N.get("/visits/prescriptions/".concat(e));'); }
+    if (req.method === 'POST') return send({ data: 'token-1234567890' });
+    if (u.pathname === '/api/patients/get') return send({ data: { docs: [{ id: 5, hospital_id: 'H-5', fullname: 'Test Patient' }] } });
+    if (u.pathname === '/api/visits/all/get') return send({ data: { docs: [{ id: 9, patient_id: 5, department: 'GOPD' }] } });
+    if (u.pathname === '/api/visits/prescriptions/9') return send({ data: { drugs: [{ id: 1, patient_id: 5, drug: { name: 'Paracetamol' } }] } });
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise((r) => emr.listen(0, '127.0.0.1', r));
+  const server = await createTestServer();
+  try {
+    const port = emr.address().port;
+    const created = await call(server, 'POST', '/hospitals', {
+      name: 'Custom Hospital', location: 'Jos', type: 'Specialist Hospital', integration: 'rest',
+      customApi: { baseUrl: `http://127.0.0.1:${port}/api/`, username: 'u', password: 'secret123', patientSearchPath: 'patients/get?search={hospitalNumber}' },
+    });
+    assert.equal(created.status, 201);
+    const out = await (await call(server, 'POST', '/hospitals/discover-records', { hospitalID: 'custom-hospital', hospitalNumber: 'H-5' })).json();
+    assert.equal(out.saved, true, JSON.stringify(out.steps));
+    const h = server.hospitalRegistry.getInternal('custom-hospital');
+    assert.deepEqual(h.customApi.recordSources.map((s) => s.resourceType), ['Encounter', 'MedicationRequest']);
+    assert.equal(h.customApi.fieldMap.patientId, 'id');
+    assert.equal(h._emrSecret, 'secret123');
+  } finally {
+    await server.close();
+    emr.close();
+  }
+});

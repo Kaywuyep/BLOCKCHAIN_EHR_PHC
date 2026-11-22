@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { resolveFieldMap } = require('./hl7AdtListener');
+const { cleanRecordSources } = require('./emrRecords');
 
 /**
  * hospitalRegistry.js
@@ -19,7 +20,10 @@ const { resolveFieldMap } = require('./hl7AdtListener');
  *           the hospital runs SmartClinic (Primed E-Health), which has its
  *           own REST API instead of FHIR/HL7 (services/smartClinicClient.js);
  *   rest    neither FHIR nor HL7: the vendor or a database-export job
- *           pushes records to POST /api/ingest/:hospitalID (Section 3.4.8);
+ *           pushes records to POST /api/ingest/:hospitalID (Section 3.4.8),
+ *           and/or (optional `customApi` settings) Cevruni signs in to the
+ *           hospital's own custom-built API to look up patients and staff
+ *           (services/customApiClient.js);
  *   manual  no live integration; staff keep the patient roster by hand.
  *
  * The FHIR client secret is stored encrypted and never returned by the API.
@@ -54,9 +58,26 @@ const SMARTCLINIC_DEFAULTS = Object.freeze({
 });
 // Where each value sits in SmartClinic's answers. Blank = detected automatically.
 const SMARTCLINIC_FIELDS = [
-  'patientList', 'patientHospitalNumber', 'patientName', 'patientDob',
+  'patientList', 'patientId', 'patientHospitalNumber', 'patientName', 'patientDob',
   'staffList', 'staffId', 'staffEmail', 'staffName', 'staffRole', 'staffDepartment', 'staffActive',
 ];
+// Custom-built hospital APIs (integration "rest", optional customApi).
+// Everything is set in the hospital setup wizard; these are the blanks' values.
+const CUSTOM_API_DEFAULTS = Object.freeze({
+  loginPath: 'auth/login',
+  loginBody: '{"username":"{username}","password":"{password}"}',
+  tokenPath: '', // blank = detected (token, access_token, data.token, data…)
+  tokenIn: 'bearer',
+  tokenName: '',
+  patientSearchPath: '',
+  staffSearchPath: '',
+});
+const CUSTOM_API_TOKEN_IN = ['bearer', 'header', 'query'];
+const CUSTOM_API_FIELDS = [
+  'patientList', 'patientId', 'patientHospitalNumber', 'patientName', 'patientDob',
+  'staffList', 'staffId', 'staffEmail', 'staffName', 'staffRole', 'staffDepartment', 'staffActive',
+];
+const FIELD_PATH = /^[\w.$-]+(\s*\+\s*[\w.$-]+)*$/;
 const MLLP_PORT_MIN = 1024;
 const MLLP_PORT_MAX = 65535;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/;
@@ -77,6 +98,15 @@ function slugify(name) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 64);
+}
+
+/** Record sources (live record reading), as a ValidationError on bad input. */
+function checkSources(list) {
+  try {
+    return cleanRecordSources(list);
+  } catch (err) {
+    throw new ValidationError(err.message);
+  }
 }
 
 function isHttpUrl(value, { allowHttp }) {
@@ -182,6 +212,7 @@ class HospitalRegistry {
       fhir: input.fhir === undefined ? existing.fhir : input.fhir,
       hl7: input.hl7 === undefined ? existing.hl7 : input.hl7,
       smartclinic: input.smartclinic === undefined ? existing.smartclinic : input.smartclinic,
+      customApi: input.customApi === undefined ? existing.customApi : input.customApi,
     };
     const clean = this._validate(merged, existing);
     this.sql.update.run({ ...clean, now: new Date().toISOString() });
@@ -375,11 +406,77 @@ class HospitalRegistry {
         patientSearchPath: clean(c.patientSearchPath) || SMARTCLINIC_DEFAULTS.patientSearchPath,
         staffSearchPath: clean(c.staffSearchPath) || SMARTCLINIC_DEFAULTS.staffSearchPath,
         fieldMap,
+        recordSources: checkSources(c.recordSources),
       };
       const password = typeof c.password === 'string' ? c.password : '';
       if (password) emrSecretEnc = this.cipher.encrypt(password);
-      else if (existing && existing._emrSecret) emrSecretEnc = this.cipher.encrypt(existing._emrSecret);
+      else if (existing && existing.smartclinic && existing._emrSecret) emrSecretEnc = this.cipher.encrypt(existing._emrSecret);
       else throw new ValidationError('SmartClinic password is required');
+    }
+
+    let customApi = null;
+    if (integration === 'rest' && input.customApi && String(input.customApi.baseUrl || '').trim()) {
+      const c = input.customApi;
+      const allowHttp = !this.production;
+      const baseUrl = String(c.baseUrl || '').trim();
+      if (!isHttpUrl(baseUrl, { allowHttp })) {
+        throw new ValidationError(`API address must be a valid ${allowHttp ? 'http(s)' : 'https'} URL, e.g. http://192.168.88.15/api/`);
+      }
+      const username = String(c.username || '').trim();
+      if (!username) throw new ValidationError('API username is required (the account the hospital created for Cevruni)');
+      const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
+      const loginBody = clean(c.loginBody, 2000) || CUSTOM_API_DEFAULTS.loginBody;
+      let parsed;
+      try {
+        parsed = JSON.parse(loginBody);
+      } catch {
+        throw new ValidationError('sign-in body must be valid JSON, e.g. {"username":"{username}","password":"{password}"}');
+      }
+      if (!parsed || typeof parsed !== 'object' || !loginBody.includes('{password}')) {
+        throw new ValidationError('sign-in body must be a JSON object containing {password}');
+      }
+      const tokenIn = clean(c.tokenIn) || CUSTOM_API_DEFAULTS.tokenIn;
+      if (!CUSTOM_API_TOKEN_IN.includes(tokenIn)) throw new ValidationError(`token placement must be one of ${CUSTOM_API_TOKEN_IN.join(', ')}`);
+      const tokenName = clean(c.tokenName, 80);
+      if (tokenName && !/^[A-Za-z0-9_-]+$/.test(tokenName)) throw new ValidationError('token header / parameter name: letters, digits, - and _ only');
+      if (tokenIn === 'header' && !tokenName) throw new ValidationError('enter the header name the token goes in (e.g. x-access-token)');
+      const tokenPath = clean(c.tokenPath, 120);
+      if (tokenPath && !/^[\w.$-]+$/.test(tokenPath)) throw new ValidationError(`invalid token path "${tokenPath}"`);
+      const patientSearchPath = clean(c.patientSearchPath);
+      // One staff member by their number, to show names instead of numbers in records.
+      const staffLookupPath = clean(c.staffLookupPath);
+      if (staffLookupPath && (!/\{(id|staffId|staffID)\}/.test(staffLookupPath) || /^[a-z]+:\/\//i.test(staffLookupPath) || staffLookupPath.includes('..'))) {
+        throw new ValidationError('staff lookup path must be relative and contain {id}, e.g. staffs/{id}');
+      }
+      const staffSearchPath = clean(c.staffSearchPath);
+      if (!patientSearchPath && !staffSearchPath) throw new ValidationError('enter a patient search path and/or a staff search path');
+      if ((c.recordSources || []).length && !patientSearchPath) throw new ValidationError('reading records needs the patient search path (to find the patient by hospital number)');
+      if (patientSearchPath && !patientSearchPath.includes('{hospitalNumber}')) throw new ValidationError('patient search path must contain {hospitalNumber}');
+      if (staffSearchPath && !/\{(query|staffID)\}/.test(staffSearchPath)) throw new ValidationError('staff search path must contain {query}');
+      const fieldMap = {};
+      for (const [k, v] of Object.entries(c.fieldMap || {})) {
+        if (!CUSTOM_API_FIELDS.includes(k)) throw new ValidationError(`unknown field "${k}"`);
+        if (v && !FIELD_PATH.test(String(v).trim())) throw new ValidationError(`invalid field path "${v}" for ${k}`);
+        if (v) fieldMap[k] = String(v).trim();
+      }
+      customApi = {
+        baseUrl: baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`,
+        username,
+        loginPath: clean(c.loginPath) || CUSTOM_API_DEFAULTS.loginPath,
+        loginBody,
+        tokenPath,
+        tokenIn,
+        tokenName,
+        patientSearchPath,
+        staffSearchPath,
+        staffLookupPath,
+        fieldMap,
+        recordSources: checkSources(c.recordSources),
+      };
+      const password = typeof c.password === 'string' ? c.password : '';
+      if (password) emrSecretEnc = this.cipher.encrypt(password);
+      else if (existing && existing.customApi && existing._emrSecret) emrSecretEnc = this.cipher.encrypt(existing._emrSecret);
+      else throw new ValidationError('API password is required');
     }
 
     return {
@@ -392,7 +489,7 @@ class HospitalRegistry {
       fhirJson: fhir ? JSON.stringify(fhir) : null,
       fhirSecretEnc,
       hl7Json: hl7 ? JSON.stringify(hl7) : null,
-      emrJson: smartclinic ? JSON.stringify(smartclinic) : null,
+      emrJson: smartclinic ? JSON.stringify(smartclinic) : customApi ? JSON.stringify(customApi) : null,
       emrSecretEnc,
     };
   }
@@ -400,8 +497,11 @@ class HospitalRegistry {
   _fromRow(row, { withSecret = false } = {}) {
     const fhir = row.fhir_json ? JSON.parse(row.fhir_json) : null;
     if (fhir) fhir.hasClientSecret = Boolean(row.fhir_secret_enc);
-    const smartclinic = row.emr_json ? JSON.parse(row.emr_json) : null;
-    if (smartclinic) smartclinic.hasPassword = Boolean(row.emr_secret_enc);
+    // emr_json holds the SmartClinic settings, or a custom API's for "rest".
+    const emr = row.emr_json ? JSON.parse(row.emr_json) : null;
+    if (emr) emr.hasPassword = Boolean(row.emr_secret_enc);
+    const smartclinic = row.integration === 'rest' ? null : emr;
+    const customApi = row.integration === 'rest' ? emr : null;
     const out = {
       hospitalID: row.hospital_id,
       name: row.name,
@@ -412,6 +512,7 @@ class HospitalRegistry {
       fhir,
       hl7: row.hl7_json ? JSON.parse(row.hl7_json) : null,
       smartclinic,
+      customApi,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       createdBy: row.created_by,
@@ -437,4 +538,7 @@ module.exports = {
   DEFAULT_FHIR_SCOPE,
   SMARTCLINIC_DEFAULTS,
   SMARTCLINIC_FIELDS,
+  CUSTOM_API_DEFAULTS,
+  CUSTOM_API_TOKEN_IN,
+  CUSTOM_API_FIELDS,
 };

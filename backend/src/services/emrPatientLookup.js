@@ -2,12 +2,13 @@
 
 const { findPatientDemographics } = require('./liveFhirClient');
 const smartClinic = require('./smartClinicClient');
+const customApi = require('./customApiClient');
 
 /**
  * emrPatientLookup.js
  *
  * When a patient enters a hospital number for a hospital whose EMR we can
- * query (FHIR API or SmartClinic), read that one record from the EMR first
+ * query (FHIR API, SmartClinic, or a custom API set up under Custom REST), read that one record from the EMR first
  * and refresh the hospital's roster entry with it. The normal linkage check
  * (hospital number + name, date of birth optional) then runs against
  * current EMR data, so a hospital without an ADT feed still works.
@@ -41,6 +42,8 @@ async function refreshFromEmr({ hospitalRegistry, fhirAdapter, logger, timeoutMs
     let found = null;
     if (hospital.integration === 'smartclinic' && hospital.smartclinic) {
       found = await withDeadline(smartClinic.findPatient(hospital, hospitalNumber), timeoutMs, 'the hospital\'s SmartClinic');
+    } else if (hospital.integration === 'rest' && hospital.customApi && hospital.customApi.patientSearchPath) {
+      found = await withDeadline(customApi.findPatient(hospital, hospitalNumber), timeoutMs, 'the hospital\'s API');
     } else if (['fhir', 'both'].includes(hospital.integration) && hospital.fhir && hospital.fhir.baseUrl) {
       found = await withDeadline(findPatientDemographics(hospital, hospitalNumber), timeoutMs, 'the hospital\'s FHIR server');
     } else {

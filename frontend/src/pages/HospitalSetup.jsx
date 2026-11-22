@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useSession } from '../auth';
 import { TemporaryPassword } from '../components/TemporaryPassword';
 import { SmartClinicConfig } from '../components/SmartClinicConfig';
+import { CustomApiConfig } from '../components/CustomApiConfig';
 import './admin.css';
 
 /**
@@ -37,8 +38,8 @@ const INTEGRATION_CHOICES = [
   },
   {
     key: 'rest',
-    title: 'Custom REST push',
-    body: 'Neither FHIR nor HL7: the vendor, or a small export job at the hospital, sends records to Cevruni’s REST endpoint as FHIR R4 JSON.',
+    title: 'Custom API',
+    body: 'The hospital has its own custom-built system (no FHIR or HL7). Cevruni signs in to its API to check patients and add clinicians, and/or the hospital sends records to Cevruni.',
   },
   {
     key: 'manual',
@@ -59,7 +60,7 @@ const FIELD_LABELS = {
   dischargeDateTime: 'Discharge date/time',
 };
 
-const INTEGRATION_LABEL = { hl7: 'HL7 ADT', fhir: 'FHIR API', both: 'HL7 ADT + FHIR', smartclinic: 'SmartClinic API', rest: 'Custom REST', manual: 'Manual roster' };
+const INTEGRATION_LABEL = { hl7: 'HL7 ADT', fhir: 'FHIR API', both: 'HL7 ADT + FHIR', smartclinic: 'SmartClinic API', rest: 'Custom API', manual: 'Manual roster' };
 
 function emptyForm(options) {
   return {
@@ -90,7 +91,11 @@ function emptyForm(options) {
       bindAddress: '',
       fieldMap: {},
     },
-    smartclinic: { baseUrl: '', username: '', password: '', loginPath: '', patientSearchPath: '', staffSearchPath: '', fieldMap: {} },
+    smartclinic: { baseUrl: '', username: '', password: '', loginPath: '', patientSearchPath: '', staffSearchPath: '', fieldMap: {}, recordSources: [] },
+    customApi: {
+      baseUrl: '', username: '', password: '', loginPath: '', loginBody: '', tokenPath: '', tokenIn: '', tokenName: '',
+      patientSearchPath: '', staffSearchPath: '', staffLookupPath: '', fieldMap: {}, recordSources: [],
+    },
     adminUser: { subject: '', displayName: '' },
   };
 }
@@ -109,6 +114,7 @@ function fromHospital(h, options) {
       ? { ...base.hl7, ...h.hl7, mllpPort: h.hl7.mllpPort || base.hl7.mllpPort, allowedIps: (h.hl7.allowedIps || []).join(', ') }
       : base.hl7,
     smartclinic: h.smartclinic ? { ...base.smartclinic, ...h.smartclinic, password: '', fieldMap: h.smartclinic.fieldMap || {} } : base.smartclinic,
+    customApi: h.customApi ? { ...base.customApi, ...h.customApi, password: '', fieldMap: h.customApi.fieldMap || {} } : base.customApi,
   };
 }
 
@@ -122,6 +128,7 @@ function toPayload(form, { editing, passwordAccounts }) {
     integration: form.integration,
     fhir: usesFhir ? form.fhir : null,
     smartclinic: form.integration === 'smartclinic' ? form.smartclinic : null,
+    customApi: form.integration === 'rest' && form.customApi.baseUrl ? form.customApi : null,
     hl7: usesHl7
       ? { ...form.hl7, mllpPort: Number(form.hl7.mllpPort), allowedIps: form.hl7.allowedIps.split(/[\s,]+/).filter(Boolean) }
       : null,
@@ -260,6 +267,22 @@ export function HospitalSetup() {
         if (!form.smartclinic.username) return 'Enter the SmartClinic username.';
         if (!form.smartclinic.password && !(editing && form.smartclinic.hasPassword)) return 'Enter the SmartClinic password.';
       }
+      if (form.integration === 'rest' && form.customApi.baseUrl) {
+        const c = form.customApi;
+        if (!/^https?:\/\//.test(c.baseUrl)) return 'Enter the API address (starts with http:// or https://).';
+        if (!c.username) return 'Enter the API username.';
+        if (!c.password && !(editing && c.hasPassword)) return 'Enter the API password.';
+        if (!c.patientSearchPath && !c.staffSearchPath) return 'Enter a patient search path and/or a staff search path.';
+        if (c.patientSearchPath && !c.patientSearchPath.includes('{hospitalNumber}')) return 'The patient search path needs {hospitalNumber}.';
+        if (c.staffSearchPath && !/\{(query|staffID)\}/.test(c.staffSearchPath)) return 'The staff search path needs {query}.';
+        if (c.loginBody) {
+          try {
+            JSON.parse(c.loginBody);
+          } catch {
+            return 'The sign-in body is not valid JSON.';
+          }
+        }
+      }
       if (usesHl7) {
         if (!form.hl7.mllpEnabled && !form.hl7.httpEnabled) return 'Turn on at least one way to receive HL7 messages.';
         if (form.hl7.mllpEnabled && !(Number(form.hl7.mllpPort) >= 1024 && Number(form.hl7.mllpPort) <= 65535)) {
@@ -362,7 +385,7 @@ export function HospitalSetup() {
                   <tr key={h.hospitalID} className={h.status !== 'active' ? 'row-muted' : ''}>
                     <td>
                       <div className="cell-title">{h.name}</div>
-                      <div className="cell-sub">{h.hospitalID}{h.location ? ` · ${h.location}` : ''}</div>
+                      <div className="cell-sub">{h.location || ''}</div>
                     </td>
                     <td>
                       <div>{INTEGRATION_LABEL[h.integration]}</div>
@@ -680,18 +703,32 @@ export function HospitalSetup() {
                 value={form.smartclinic}
                 onChange={(patch) => setForm((f) => ({ ...f, smartclinic: { ...f.smartclinic, ...patch } }))}
                 defaults={options?.smartclinicDefaults}
+                recordOptions={{ resourceTypes: options?.recordResourceTypes, presets: options?.recordPresets }}
                 editingID={editingID}
                 hasPassword={Boolean(editing && form.smartclinic.hasPassword)}
               />
             )}
 
             {form.integration === 'rest' && (
+              <CustomApiConfig
+                value={form.customApi}
+                onChange={(patch) => setForm((f) => ({ ...f, customApi: { ...f.customApi, ...patch } }))}
+                defaults={options?.customApiDefaults}
+                tokenInOptions={options?.customApiTokenIn}
+                recordOptions={{ resourceTypes: options?.recordResourceTypes, presets: options?.recordPresets }}
+                editingID={editingID}
+                hasPassword={Boolean(editing && form.customApi.hasPassword)}
+              />
+            )}
+
+            {form.integration === 'rest' && (
               <div className="config-block">
                 <p className="hint" style={{ marginTop: 0 }}>
+                  <strong>Sending records to Cevruni (optional).</strong>{' '}
                   The hospital (or its vendor) sends records with <code>POST /api/ingest/{form.hospitalID || 'hospital-id'}</code>, signed in with an
                   account that has the <strong>HL7 Interface</strong> role for this hospital (add it under Users). Body:
                 </p>
-                <pre className="code-sample">{`{
+                <pre className="code-sample" data-allow-copy>{`{
   "hospitalNumber": "536728",
   "patient": { "name": "Amina Yusuf", "dob": "1995-03-15" },
   "resources": [
@@ -777,6 +814,12 @@ export function HospitalSetup() {
                   <span className="v">{form.fhir.baseUrl}{fhirTest ? (fhirTest.ok ? ' · tested ✓' : ' · test failed') : ' · not tested'}</span>
                 </div>
               )}
+              {form.integration === 'rest' && form.customApi.baseUrl && (
+                <div className="data-row">
+                  <span className="k">Hospital API</span>
+                  <span className="v">{form.customApi.baseUrl} as “{form.customApi.username}”</span>
+                </div>
+              )}
               {form.integration === 'smartclinic' && (
                 <div className="data-row">
                   <span className="k">SmartClinic</span>
@@ -825,11 +868,12 @@ function ConnectionInstructions({ hospital }) {
   if (hospital.integration === 'rest') {
     lines.push(`Custom REST: POST ${window.location.origin}/api/ingest/${hospital.hospitalID} (JSON: hospitalNumber, patient, resources[] as FHIR R4; bearer token with role hl7_interface)`);
   }
+  if (hospital.customApi) lines.push(`Hospital API: Cevruni will sign in to ${hospital.customApi.baseUrl} as “${hospital.customApi.username}”`);
   if (hospital.smartclinic) lines.push(`SmartClinic: Cevruni will sign in to ${hospital.smartclinic.baseUrl} as “${hospital.smartclinic.username}”`);
   if (hospital.fhir) lines.push(`FHIR: Cevruni will call ${hospital.fhir.baseUrl} as client “${hospital.fhir.clientId || '—'}”`);
   if (!lines.length) return null;
   return (
-    <div className="instructions">
+    <div className="instructions" data-allow-copy>
       <strong>Send to the hospital’s integration team:</strong>
       <pre>{lines.join('\n')}</pre>
     </div>

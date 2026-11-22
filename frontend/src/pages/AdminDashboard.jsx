@@ -11,6 +11,7 @@ import { HospitalSetup } from './HospitalSetup';
 import { UserDirectory } from './UserDirectory';
 import { Insights } from './Insights';
 import { HospitalScope, HospitalOverview, AccessLog, HospitalGrants, Clinicians, HospitalPatients } from './HospitalAdminView';
+import { clinicianName, actorName } from '../people';
 import { LedgerStrip } from '../components/LedgerStrip';
 
 const EMPTY_ROSTER_FORM = { hospitalNumber: '', name: '', dob: '' };
@@ -158,7 +159,7 @@ export function AdminDashboard() {
             {hospitalStatuses.map((hospital) => (
               <div className="data-row" key={hospital.hospitalID}>
                 <div>
-                  <div className="k">{hospital.hospitalID}</div>
+                  <div className="k">{hospital.hospitalName || hospital.name || 'Hospital'}</div>
                   <div className="hint">{hospital.mode === 'hl7' ? `MLLP port ${hospital.mllpPort}` : hospital.mode} · {hospital.messagesReceived} messages · Last: {hospital.lastMessageAt ? new Date(hospital.lastMessageAt).toLocaleString() : 'None'}</div>
                 </div>
                 <div className="v" style={{ color: hospital.status === 'listening' ? 'var(--sage)' : 'var(--amber)' }}>
@@ -278,9 +279,9 @@ export function AdminDashboard() {
                   <span className="hint">{new Date(g.grantedAt).toLocaleString()} · {g.status === 'ACTIVE' ? `active until ${new Date(g.expiresAt).toLocaleTimeString()}` : g.status.toLowerCase()}</span>
                 </div>
                 <div className="bg-review-body">
-                  <div><span className="k">Clinician</span> {g.providerID} ({g.viewedFromName})</div>
+                  <div><span className="k">Clinician</span> {clinicianName(g)}{g.providerRole ? ` (${g.providerRole})` : ''} · {g.viewedFromName}</div>
                   <div><span className="k">Records at</span> {g.recordsAtName}</div>
-                  <div><span className="k">Patient</span> <span className="mono">{g.patientDID}</span></div>
+                  <div><span className="k">Patient</span> {g.patientName || 'Name not held on the patient roster'}</div>
                   <div><span className="k">Reason</span> {g.justification}</div>
                   {g.representative && (
                     <div>
@@ -315,8 +316,8 @@ export function AdminDashboard() {
             {screenCaptures.map((a) => (
               <div key={a.id} className="data-row">
                 <span className="k">
-                  {a.actorID}{a.role ? ` (${a.role})` : ''}{a.hospitalID ? ` @ ${a.hospitalID}` : ''} · {CAPTURE_METHOD_LABELS[a.method] || a.method} · {a.confidence}
-                  {a.patientDID ? ` · viewing ${a.patientDID}` : ''}{a.page ? ` · ${a.page}` : ''}
+                  {actorName(a)}{a.role ? ` (${a.role})` : ''}{a.hospitalID ? ` @ ${a.hospitalName || 'their hospital'}` : ''} · {CAPTURE_METHOD_LABELS[a.method] || a.method} · {a.confidence}
+                  {a.patientDID ? ' · while viewing a patient’s records' : ''}{a.page ? ` · ${a.page}` : ''}
                   {!a.ledgerEntryID && ' · ledger write failed'}
                 </span>
                 <span className="v">{new Date(a.occurredAt).toLocaleString()}</span>
@@ -343,18 +344,20 @@ const CAPTURE_METHOD_LABELS = {
   'mac-shortcut': 'macOS screenshot shortcut',
   'windows-snip': 'Windows Snipping Tool shortcut',
   print: 'Print / Save as PDF',
+  copy: 'Copy attempt',
+  'save-page': 'Save page attempt (Ctrl/Cmd+S)',
 };
 
 function describeEvent(e) {
   switch (e.type) {
-    case 'PatientRegistered': return `Patient ${e.payload.patientDID} registered`;
-    case 'RecordReferenceRegistered': return `Reference at ${e.payload.hospitalID} (${e.payload.recordType})`;
-    case 'AccessRequested': return `${e.payload.providerID} requested access to ${e.payload.patientDID}`;
-    case 'AccessGranted': return `Access granted to ${e.payload.providerID}`;
-    case 'AccessRevoked': return `Access revoked from ${e.payload.providerID}`;
-    case 'AuditEntryWritten': return `${e.payload.eventType} logged for ${e.payload.patientDID}`;
-    case 'BreakGlassAccess': return `EMERGENCY: ${e.payload.providerID} @ ${e.payload.hospitalID}`;
-    case 'BreakGlassReviewed': return `Break-glass reviewed by ${e.payload.reviewedBy}`;
+    case 'PatientRegistered': return 'A patient registered';
+    case 'RecordReferenceRegistered': return `Record reference at ${e.payload.hospitalName || 'a hospital'} (${e.payload.recordType})`;
+    case 'AccessRequested': return `${clinicianName(e.payload)} requested access to a patient's records`;
+    case 'AccessGranted': return `Access granted to ${clinicianName(e.payload)}`;
+    case 'AccessRevoked': return `Access revoked from ${clinicianName(e.payload)}`;
+    case 'AuditEntryWritten': return `${e.payload.eventType} logged${e.payload.actorName ? ` by ${e.payload.actorName}` : ''}`;
+    case 'BreakGlassAccess': return `EMERGENCY: ${clinicianName(e.payload)} opened records at ${e.payload.hospitalName || 'a hospital'}`;
+    case 'BreakGlassReviewed': return `Break-glass reviewed by ${e.payload.reviewedByName || 'the hospital'}`;
     default: return e.type;
   }
 }

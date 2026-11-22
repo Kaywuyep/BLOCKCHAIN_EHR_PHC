@@ -37,7 +37,7 @@ function visibleTo(user, evt) {
   return false;
 }
 
-function eventsRouter(ledgerPromise) {
+function eventsRouter(ledgerPromise, { names = null } = {}) {
   const router = express.Router();
 
   router.get('/stream', async (req, res) => {
@@ -55,7 +55,7 @@ function eventsRouter(ledgerPromise) {
     const send = (evt) => {
       for (const e of flatten(evt)) {
         if (!visibleTo(req.user, e)) continue;
-        res.write(`event: ledger\ndata: ${JSON.stringify({ type: e.type, payload: e.payload, timestamp: e.timestamp, batch: e.batch || undefined })}\n\n`);
+        res.write(`event: ledger\ndata: ${JSON.stringify({ type: e.type, payload: names ? names.enrich(e.payload) : e.payload, timestamp: e.timestamp, batch: e.batch || undefined })}\n\n`);
       }
     };
     const unsubscribe = ledger.onEvent(send);

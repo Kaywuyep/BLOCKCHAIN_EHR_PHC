@@ -72,6 +72,7 @@ test('reconcile replays queued actions chronologically against the ledger and ma
 
     const calls = [];
     const fakeLedger = {
+      writeAuditEntry: async (entry) => entry,
       requestAccess: async (payload) => {
         calls.push(['requestAccess', payload]);
         return { grantID: payload.grantID, status: 'PENDING' };
@@ -100,6 +101,7 @@ test('reconcile marks a failing action FAILED without losing or duplicating the 
     queue.enqueue('GRANT_ACCESS', { grantID: 'will-succeed', durationMinutes: 15 });
 
     const fakeLedger = {
+      writeAuditEntry: async (entry) => entry,
       requestAccess: async () => {
         throw new Error('ledger unavailable');
       },
@@ -140,6 +142,28 @@ test('a revoke replayed from the offline queue writes an audit entry flagged que
     assert.equal(auditCalls.length, 1);
     assert.equal(auditCalls[0].eventType, 'GRANT_REVOKED');
     assert.equal(auditCalls[0].queuedOffline, true, 'the audit trail must record that this write was delayed by an offline period');
+  } finally {
+    cleanup();
+  }
+});
+
+test('an approval replayed from the offline queue writes a GRANT_ISSUED audit entry flagged queuedOffline', async () => {
+  const { queue, cleanup } = newQueue();
+  try {
+    queue.enqueue('GRANT_ACCESS', { grantID: 'g2', durationMinutes: 30 });
+    const auditCalls = [];
+    const fakeLedger = {
+      grantAccess: async (payload) => ({ grantID: payload.grantID, patientDID: 'did:p2', hospitalID: 'HospitalA', status: 'ACTIVE' }),
+      writeAuditEntry: async (entry) => {
+        auditCalls.push(entry);
+        return entry;
+      },
+    };
+    await queue.reconcile(fakeLedger);
+    assert.equal(auditCalls.length, 1, 'an approval made offline must be audited like one made online');
+    assert.equal(auditCalls[0].eventType, 'GRANT_ISSUED');
+    assert.equal(auditCalls[0].patientDID, 'did:p2');
+    assert.equal(auditCalls[0].queuedOffline, true);
   } finally {
     cleanup();
   }

@@ -81,19 +81,19 @@ test('golden path: create Health ID, link a second hospital, request, approve, v
     // The pending-request badge updates from the ledger event stream.
     await expect(patientPage.locator('.sidebar-badge')).toHaveText('1');
     await gotoNav(patientPage, 'Access Control');
-    const request = patientPage.locator('.pa-req').filter({ hasText: providerID });
+    const request = patientPage.locator('.pa-req').filter({ hasText: 'Dr Golden Path' }); // names, not IDs, on screen
     await expect(request).toContainText(`at ${H.langtang.name} asks to see your records from ${H.wase.name}`);
     await expect(request).toContainText('Encounter');
     await request.getByRole('button', { name: 'Approve 24 h' }).click();
-    const active = patientPage.locator('.pa-active').filter({ hasText: providerID });
-    await expect(active).toContainText(`${providerID} at ${H.langtang.name}`);
+    const active = patientPage.locator('.pa-active').filter({ hasText: 'Dr Golden Path' });
+    await expect(active).toContainText(`Dr Golden Path (Physician) at ${H.langtang.name}`);
     await expect(active).toContainText('signed by you ✓');
   });
 
   const card = clinicianPage.locator('.vr-card').filter({ hasText: name });
   await test.step('the clinician opens the Wase records, fetched from Wase and logged', async () => {
     await gotoNav(clinicianPage, 'View Records');
-    await expect(card.locator('.vr-status')).toHaveText('ACTIVE');
+    await expect(card.locator('.vr-status')).toHaveText('Active');
     await expect(card).toContainText(`Records at ${H.wase.name} (No. ${wasNumber})`);
     await card.locator('button.vr-toggle', { hasText: 'Open records' }).click();
     await expect(card.getByText('Access verified on the blockchain and logged')).toBeVisible();
@@ -105,14 +105,14 @@ test('golden path: create Health ID, link a second hospital, request, approve, v
 
   await test.step('the access is on the patient\'s audit trail', async () => {
     await gotoNav(patientPage, 'Audit Trail');
-    await expect(patientPage.locator('.data-row').filter({ hasText: `RECORD_ACCESSED — ${providerID}` })).toBeVisible();
+    await expect(patientPage.locator('.data-row').filter({ hasText: 'RECORD_ACCESSED — Dr Golden Path' })).toBeVisible();
   });
 
   await test.step('the patient revokes access', async () => {
     await gotoNav(patientPage, 'Access Control');
-    await patientPage.locator('.pa-active').filter({ hasText: providerID }).getByRole('button', { name: 'Revoke' }).click();
-    await expect(patientPage.locator('.pa-active').filter({ hasText: providerID })).toHaveCount(0);
-    await expect(patientPage.locator('.data-row').filter({ hasText: providerID })).toContainText('REVOKED');
+    await patientPage.locator('.pa-active').filter({ hasText: 'Dr Golden Path' }).getByRole('button', { name: 'Revoke' }).click();
+    await expect(patientPage.locator('.pa-active').filter({ hasText: 'Dr Golden Path' })).toHaveCount(0);
+    await expect(patientPage.locator('.data-row').filter({ hasText: 'Dr Golden Path' })).toContainText('REVOKED');
   });
 
   await test.step('the clinician can no longer open the records', async () => {
@@ -120,8 +120,9 @@ test('golden path: create Health ID, link a second hospital, request, approve, v
     // and a revoked grant leaves the "Current" list.
     await expect(card).toHaveCount(0);
     await clinicianPage.locator('.vr-tabs').getByRole('button', { name: /^All/ }).click();
-    await expect(card.locator('.vr-status')).toHaveText('REVOKED');
-    await expect(card).toContainText('Revoked by patient');
+    await expect(card.locator('.vr-status')).toHaveText('Ended by patient');
+    await expect(card).toContainText('Ended by patient');
+    await expect(card).toContainText('No access');
     await expect(card.locator('button.vr-toggle', { hasText: 'Open records' })).toHaveCount(0);
 
     // And the gateway itself refuses, whatever the UI shows.

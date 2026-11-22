@@ -2,6 +2,7 @@
 
 const { request } = require('./liveFhirClient');
 const { SMARTCLINIC_DEFAULTS } = require('./hospitalRegistry');
+const emrRecords = require('./emrRecords');
 
 /**
  * smartClinicClient.js
@@ -170,6 +171,7 @@ function suggestFieldMap({ patient, staff, patientListPath, staffListPath } = {}
   const s = {};
   if (patient) {
     s.patientList = patientListPath || '';
+    s.patientId = ['_id', 'id', 'patient_id', 'uuid'].find((k) => patient[k] != null && patient[k] !== '') || '';
     s.patientHospitalNumber = guessKey(patient, GUESS.patientHospitalNumber);
     s.patientName = nameSpec(patient);
     s.patientDob = guessKey(patient, GUESS.patientDob);
@@ -255,10 +257,26 @@ async function call(c, url, { method = 'GET', body } = {}) {
   return res;
 }
 
-async function login(hospital, { fresh = false } = {}) {
+// SmartClinic keeps ONE session per account: a second sign-in ends the
+// first ("signed in on another device"). So sign-ins are never run in
+// parallel, and a request whose session was replaced uses the new one
+// instead of signing in again.
+const signingIn = new Map(); // hospital key -> Promise<token>
+
+async function login(hospital, { fresh = false, replacing = null } = {}) {
   const c = settings(hospital);
-  const cached = tokens.get(hospital.hospitalID || c.baseUrl);
+  const key = hospital.hospitalID || c.baseUrl;
+  const cached = tokens.get(key);
   if (!fresh && cached && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token;
+  // Someone already renewed the session since this request's token was issued.
+  if (fresh && replacing && cached && cached.token !== replacing) return cached.token;
+  if (signingIn.has(key)) return signingIn.get(key);
+  const p = signIn(hospital, c, key).finally(() => signingIn.delete(key));
+  signingIn.set(key, p);
+  return p;
+}
+
+async function signIn(hospital, c, key) {
   const password = hospital._emrSecret || hospital.smartclinic.password;
   if (!password) throw new SmartClinicError('no SmartClinic password is stored for this hospital');
   const res = await call(c, urlFor(c, c.loginPath), { method: 'POST', body: { data: { username: c.username, password } } });
@@ -268,15 +286,17 @@ async function login(hospital, { fresh = false } = {}) {
   }
   const token = j.token || (j.data && (j.data.v1Token || j.data.token));
   if (!token) throw new SmartClinicError('SmartClinic accepted the login but returned no token');
-  tokens.set(hospital.hospitalID || c.baseUrl, { token, at: Date.now() });
+  tokens.set(key, { token, at: Date.now() });
   return token;
 }
 
 /** GET with the session token; logs in again once if the token has expired. */
 async function get(hospital, pathTemplate, vars) {
   const c = settings(hospital);
+  let used = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const token = await login(hospital, { fresh: attempt > 0 });
+    const token = await login(hospital, { fresh: attempt > 0, replacing: used });
+    used = token;
     const res = await call(c, urlFor(c, pathTemplate, vars, token));
     const j = res.json;
     const expired = res.status === 401 || res.status === 403 || (j && j.error && /token|session|expired|auth/i.test(String(j.message || '')));
@@ -292,15 +312,21 @@ async function get(hospital, pathTemplate, vars) {
 
 // ── Lookups ─────────────────────────────────────────────────────────────
 
-/** { hospitalNumber, name, dob } for exactly one matching patient, or null. */
-async function findPatient(hospital, hospitalNumber) {
+/** The one raw patient record whose hospital number matches exactly, with the field map used, or null. */
+async function findPatientRecord(hospital, hospitalNumber) {
   const c = settings(hospital);
   const json = await get(hospital, c.patientSearchPath, { hospitalNumber });
   const { list, path } = findList(json, c.fieldMap.patientList);
   const fm = { ...suggestFieldMap({ patient: list[0], patientListPath: path }), ...c.fieldMap };
   const matches = list.filter((r) => sameId(read(r, fm.patientHospitalNumber), hospitalNumber));
-  if (matches.length !== 1) return null;
-  const r = matches[0];
+  return matches.length === 1 ? { record: matches[0], fm } : null;
+}
+
+/** { hospitalNumber, name, dob } for exactly one matching patient, or null. */
+async function findPatient(hospital, hospitalNumber) {
+  const hit = await findPatientRecord(hospital, hospitalNumber);
+  if (!hit) return null;
+  const { record: r, fm } = hit;
   const name = text(read(r, fm.patientName));
   if (!name) return null;
   return { hospitalNumber: String(read(r, fm.patientHospitalNumber)).trim(), name, dob: isoDate(read(r, fm.patientDob)) };
@@ -465,7 +491,72 @@ async function testConnection(hospital, { hospitalNumber, staffID } = {}) {
   return out;
 }
 
+/**
+ * Live record reading (routes/records.js): finds the patient by hospital
+ * number, then reads the record sources set up for this hospital. Nothing
+ * is stored.
+ */
+async function readPatientRecords(hospital, hospitalNumber, { types } = {}) {
+  const c = settings(hospital);
+  const sources = c.recordSources || [];
+  if (!sources.length) throw new SmartClinicError('no record sources are set up for this hospital');
+  const hit = await findPatientRecord(hospital, hospitalNumber);
+  if (!hit) throw new SmartClinicError('the patient was not found in SmartClinic by their hospital number');
+  const v = hit.fm.patientId ? read(hit.record, hit.fm.patientId) : (hit.record._id ?? hit.record.id ?? hit.record.patient_id);
+  if (v == null || v === '') throw new SmartClinicError('could not tell the patient\'s SmartClinic ID: set "Patient ID" under Field mapping');
+  return emrRecords.readRecords({
+    sources,
+    patientId: String(v).trim(),
+    hospitalNumber,
+    types,
+    getJson: (path, vars) => get(hospital, path, vars),
+  });
+}
+
+/** "Find records automatically" for SmartClinic (nothing stored). */
+async function discoverRecords(hospital, hospitalNumber, { webAppUrl } = {}) {
+  const { discoverRecordSources } = require('./recordDiscovery');
+  const c = settings(hospital);
+  const hit = await findPatientRecord(hospital, hospitalNumber);
+  if (!hit) throw new SmartClinicError('that hospital number was not found in SmartClinic');
+  const field = hit.fm.patientId || ['_id', 'id', 'patient_id'].find((k) => hit.record[k] != null);
+  const v = field ? read(hit.record, field) : null;
+  if (v == null || v === '') throw new SmartClinicError('could not tell the patient\'s SmartClinic ID: set "Patient ID" under Field mapping');
+  const patientId = String(v).trim();
+  const getJson = (path, vars) => get(hospital, path, vars);
+  // SmartClinic's record layout is known (emrRecords.RECORD_PRESETS.smartclinic,
+  // checked against JUTH): read this patient with it and keep every part
+  // that answers. Only if none does, search the web app like any system.
+  const preset = emrRecords.cleanRecordSources(emrRecords.RECORD_PRESETS.smartclinic.sources);
+  const tried = await emrRecords.readRecords({ sources: preset, getJson, patientId, hospitalNumber });
+  const working = new Set(tried.sources.filter((x) => x.ok).map((x) => x.label));
+  if (working.size) {
+    return {
+      sources: preset.filter((s) => working.has(s.label)),
+      steps: tried.sources.map((x) => ({
+        step: x.label,
+        ok: x.ok,
+        detail: x.ok ? `${x.count} record(s) for this patient${x.dropped ? `; ${x.dropped} of other patients dropped` : ''}` : `not available: ${x.error}`,
+      })),
+      probes: tried.sources.length,
+      patientIdField: field,
+    };
+  }
+  const out = await discoverRecordSources({
+    getJson,
+    patientId,
+    hospitalNumber,
+    webAppUrl: webAppUrl || new URL(c.baseUrl).origin + '/',
+    apiBaseUrl: c.baseUrl,
+  });
+  return { ...out, patientIdField: field };
+}
+
 module.exports = {
+  getJson: get,
+  findPatientRecord,
+  discoverRecords,
+  readPatientRecords,
   findPatient,
   fetchStaff,
   searchStaff,

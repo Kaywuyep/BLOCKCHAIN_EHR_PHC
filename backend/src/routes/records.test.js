@@ -172,3 +172,50 @@ test('a resourceType request inside the grant\'s recorded scope is allowed', asy
     await server.close();
   }
 });
+
+// Hospitals whose own API Cevruni reads (custom API / SmartClinic): records
+// are read live at view time and never stored (user decision, 2026-11-18).
+test('a custom-API hospital is read live at view time and nothing is stored in Cevruni', async () => {
+  const http = require('node:http');
+  const { RECORD_PRESETS } = require('../services/emrRecords');
+  const emr = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const send = (j) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+    if (req.method === 'POST') return send({ data: 'token-1234567890' });
+    if (u.pathname === '/api/patients/get') return send({ data: { docs: [{ id: 223, hospital_id: 'PSSH/000223', fullname: 'Test Patient' }] } });
+    if (u.pathname === '/api/visits/all/get') return send({ data: { docs: [{ id: 274, patient_id: 223, department: 'O&G', date_visit_start: '2026-11-03T11:05:45Z' }] } });
+    if (u.pathname === '/api/visits/prescriptions/274') return send({ data: { tests: [], drugs: [{ id: 1, patient_id: 223, drug: { name: 'Paracetamol' } }, { id: 2, patient_id: 999, drug: { name: 'Not this patient' } }], investigations: [] } });
+    if (u.pathname === '/api/consultations/diagnoses/get/274') return send({ data: { diagnoses: [] } });
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise((r) => emr.listen(0, '127.0.0.1', r));
+  const server = await createTestServer();
+  try {
+    server.hospitalRegistry.create({
+      hospitalID: 'pssh-test', name: 'PSSH Test', location: 'Jos', type: 'Specialist Hospital', integration: 'rest',
+      customApi: {
+        baseUrl: `http://127.0.0.1:${emr.address().port}/api/`, username: 'u', password: 'secret123',
+        patientSearchPath: 'patients/get?search={hospitalNumber}', recordSources: RECORD_PRESETS.pssh.sources, fieldMap: { patientId: 'id' },
+      },
+    });
+    server.ledger.registerPatient({ patientDID: 'did:p1', publicKey: 'pk1' });
+    server.fhirAdapter.registerLocalPatient('pssh-test', 'did:p1', 'PSSH/000223');
+    server.providerRegistry.register({ providerID: 'dr-adeyemi', hospitalID: 'pssh-test', status: 'ACTIVE' });
+    server.ledger.requestAccess({ grantID: 'g1', patientDID: 'did:p1', providerID: 'dr-adeyemi', hospitalID: 'pssh-test' });
+    server.ledger.grantAccess({ grantID: 'g1', durationMinutes: 30 });
+
+    const res = await fetch(`${server.baseUrl}/api/records/resolve?grantID=g1&hospitalID=pssh-test`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const resources = body.bundles.flatMap((b) => b.entry.map((e) => e.resource));
+    assert.deepEqual(resources.filter((r) => r.resourceType === 'MedicationRequest').map((r) => r.medicationCodeableConcept.text), ['Paracetamol']);
+    assert.equal(body.liveSource.ok, true);
+    assert.equal(body.liveSource.kind, 'emr');
+    assert.equal(server.db.prepare('SELECT COUNT(*) AS n FROM clinical_bundles').get().n, 0);
+    const audit = server.ledger.getAuditTrailForPatient('did:p1');
+    assert.ok(audit.some((e) => e.eventType === 'RECORD_ACCESSED' && /live hospital API ok/.test(e.detail)));
+  } finally {
+    await server.close();
+    emr.close();
+  }
+});

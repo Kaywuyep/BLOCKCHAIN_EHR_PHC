@@ -5,7 +5,7 @@ const express = require('express');
 const { ROLES, hasRole, isPatientSelf, isSystemAdmin, deny, actorID } = require('../auth/policy');
 
 // How the frontend's ScreenShield saw the attempt (see ScreenShield.jsx).
-const CAPTURE_METHODS = new Set(['print-screen', 'mac-shortcut', 'windows-snip', 'print']);
+const CAPTURE_METHODS = new Set(['print-screen', 'mac-shortcut', 'windows-snip', 'print', 'copy', 'save-page']);
 // confirmed: the page saw the capture key itself.
 // suspected: Cmd/Win+Shift was held and released with no other key reaching
 // the page, which is what happens when the OS consumes the capture key.
@@ -124,6 +124,30 @@ function auditRouter(ledgerPromise, { db = null, logger = null } = {}) {
       });
     }
     res.status(201).json(attempt);
+  });
+
+  // A staff member confirms the confidentiality notice (once per sign-in):
+  // written to the ledger audit trail, so misuse later is clearly against
+  // an acknowledged rule. The actor comes from the token.
+  router.post('/confidentiality', async (req, res) => {
+    const user = req.user;
+    if (!user || user.superuser) return res.status(204).end();
+    try {
+      const ledger = await ledgerPromise;
+      await ledger.writeAuditEntry({
+        patientDID: '',
+        eventType: 'CONFIDENTIALITY_ACCEPTED',
+        actorID: actorID(user, 'anonymous'),
+        hospitalID: user.hospitalID || '',
+        detail: 'confidentiality notice confirmed at sign-in: patient information is confidential; viewing is recorded; copying or photographing is not allowed',
+        clientTimestamp: new Date().toISOString(),
+        queuedOffline: false,
+      });
+      res.status(201).json({ ok: true });
+    } catch (err) {
+      if (logger) logger.error('confidentiality ledger write failed', { requestId: req.id, err });
+      res.status(202).json({ ok: false });
+    }
   });
 
   // Lists recent attempts. Hospital admins see their own hospital's.

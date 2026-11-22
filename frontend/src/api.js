@@ -86,6 +86,8 @@ export const api = {
   getAuditTrail: (did) => request(`/audit/patient/${encodeURIComponent(did)}`),
   getRecentEvents: () => request('/audit/events/recent'),
   logScreenCapture: (data) => request('/audit/screen-capture', { method: 'POST', body: JSON.stringify(data) }),
+  extendGrant: (grantID, data) => request(`/access/${encodeURIComponent(grantID)}/patient-extend`, { method: 'POST', body: JSON.stringify(data) }),
+  acceptConfidentiality: () => request('/audit/confidentiality', { method: 'POST', body: '{}' }),
   getScreenCaptures: () => request('/audit/screen-captures'),
 
   // Hospital admin view (own hospital; system admins pass hospitalID)
@@ -115,6 +117,9 @@ export const api = {
     request(`/admin/hospitals/${encodeURIComponent(id)}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
   adminTestFhir: (data) => request('/admin/hospitals/test-fhir', { method: 'POST', body: JSON.stringify(data) }),
   adminTestSmartClinic: (data) => request('/admin/hospitals/test-smartclinic', { method: 'POST', body: JSON.stringify(data) }),
+  adminTestCustomApi: (data) => request('/admin/hospitals/test-custom-api', { method: 'POST', body: JSON.stringify(data) }),
+  adminTestRecords: (data) => request('/admin/hospitals/test-records', { method: 'POST', body: JSON.stringify(data) }),
+  adminDiscoverRecords: (data) => request('/admin/hospitals/discover-records', { method: 'POST', body: JSON.stringify(data) }),
   adminTestHl7: (data) => request('/admin/hospitals/test-hl7', { method: 'POST', body: JSON.stringify(data) }),
   adminListUsers: () => request('/admin/users'),
   adminCreateUser: (data) => request('/admin/users', { method: 'POST', body: JSON.stringify(data) }),

@@ -19,7 +19,7 @@ export function TemporaryPassword({ account, who = 'They' }) {
     }
   }
   return (
-    <div className="temp-password" role="status">
+    <div className="temp-password" role="status" data-allow-copy>
       <div>
         <div className="cell-sub">Username</div>
         <code>{account.login}</code>

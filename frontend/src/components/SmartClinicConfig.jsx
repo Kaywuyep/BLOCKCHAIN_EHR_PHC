@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { RecordSourcesConfig } from './RecordSourcesConfig';
 
 /**
  * SmartClinicConfig — Hospital setup, Connection step, for hospitals running
@@ -16,6 +17,7 @@ import { api } from '../api';
  */
 
 const PATIENT_FIELDS = [
+  ['patientId', 'Patient ID in SmartClinic (for record reading)'],
   ['patientHospitalNumber', 'Hospital number'],
   ['patientName', 'Patient name'],
   ['patientDob', 'Date of birth'],
@@ -44,7 +46,7 @@ function apiUrlFrom(text) {
   return t;
 }
 
-export function SmartClinicConfig({ value, onChange, defaults = {}, editingID, hasPassword }) {
+export function SmartClinicConfig({ value, onChange, defaults = {}, editingID, hasPassword, recordOptions }) {
   const [sample, setSample] = useState({ hospitalNumber: '', staffID: '' });
   const [result, setResult] = useState(null);
   const [testing, setTesting] = useState(false);
@@ -177,6 +179,21 @@ export function SmartClinicConfig({ value, onChange, defaults = {}, editingID, h
           </div>
         )}
       </div>
+
+
+      <RecordSourcesConfig
+        value={value.recordSources || []}
+        onChange={(list, preset) =>
+          onChange({
+            recordSources: list,
+            ...(preset?.patientIdField && !fm.patientId ? { fieldMap: { ...fm, patientId: preset.patientIdField } } : {}),
+          })
+        }
+        resourceTypes={recordOptions?.resourceTypes}
+        presets={Object.fromEntries(Object.entries(recordOptions?.presets || {}).filter(([, p]) => p.system === 'smartclinic'))}
+        editingID={editingID}
+        fieldMap={fm}
+      />
 
       <details>
         <summary>Field mapping (optional)</summary>

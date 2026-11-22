@@ -122,3 +122,30 @@
 a.overview-row:hover { background: var(--paper-2, #f8fafc); }
 .overview-row .warn { color: #b45309; font-weight: 600; }
 .quick-actions a.btn, .panel-head a.btn { text-decoration: none; }
+/* Live hospital records: full results and all details */
+.vr-result { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 13px; }
+.vr-result th, .vr-result td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.vr-result th { font-weight: 600; color: var(--ink-soft); font-size: 12px; }
+.vr-result tr.flagged td { color: #b91c1c; }
+.vr-all { margin-top: 6px; font-size: 13px; }
+.vr-all summary { cursor: pointer; color: var(--verdigris); font-weight: 500; }
+.vr-all dl { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 3px 14px; margin: 6px 0 0; }
+.vr-all dl > div { display: contents; }
+.vr-all dt { color: var(--ink-soft); }
+.vr-all dd { margin: 0; color: var(--ink); word-break: break-word; }
+@media (max-width: 640px) {
+  .vr-result thead { display: none; }
+  .vr-result tr { display: block; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .vr-result td { display: flex; gap: 8px; border: 0; padding: 2px 0; }
+  .vr-result td::before { content: attr(data-label); min-width: 100px; color: var(--ink-soft); }
+  .vr-all dl { grid-template-columns: 1fr; }
+  .vr-all dd { margin-bottom: 4px; }
+}
+/* View Records history */
+.vr-tabs { flex-wrap: wrap; }
+.vr-history { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); }
+.vr-history span + span::before { content: '·'; margin-right: 12px; color: var(--line); }
+.vr-status.ended, .vr-status.declined { background: #fde8e8; color: #b91c1c; }
+.vr-status.expired { background: var(--parchment); color: var(--ink-soft); }
+.vr-card.status-expired, .vr-card.status-ended, .vr-card.status-declined { opacity: .85; }
+.vr-status.extended { background: var(--sage-bg); color: #047857; opacity: .7; }

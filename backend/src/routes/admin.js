@@ -9,6 +9,9 @@ const {
   DEFAULT_FHIR_SCOPE,
   SMARTCLINIC_DEFAULTS,
   SMARTCLINIC_FIELDS,
+  CUSTOM_API_DEFAULTS,
+  CUSTOM_API_TOKEN_IN,
+  CUSTOM_API_FIELDS,
   slugify,
 } = require('../services/hospitalRegistry');
 const { DEFAULT_FIELD_MAP, parseHl7Message, mapAdtMessageToResources, resolveFieldMap } = require('../services/hl7AdtListener');
@@ -16,6 +19,8 @@ const { getHospitalStatus } = require('../services/hospitalStatus');
 const fixtures = require('../services/hl7AdtListener.fixtures');
 const { request } = require('../services/liveFhirClient');
 const smartClinic = require('../services/smartClinicClient');
+const customApi = require('../services/customApiClient');
+const { cleanRecordSources, RESOURCE_TYPES, RECORD_PRESETS } = require('../services/emrRecords');
 
 /**
  * admin.js — System Admin only.
@@ -89,6 +94,11 @@ function adminRouter({ registry, users, listenerManager, onboarding = null, acco
       defaultFieldMap: DEFAULT_FIELD_MAP,
       smartclinicDefaults: SMARTCLINIC_DEFAULTS,
       smartclinicFields: SMARTCLINIC_FIELDS,
+      customApiDefaults: CUSTOM_API_DEFAULTS,
+      customApiTokenIn: CUSTOM_API_TOKEN_IN,
+      customApiFields: CUSTOM_API_FIELDS,
+      recordResourceTypes: RESOURCE_TYPES,
+      recordPresets: RECORD_PRESETS,
       nextMllpPort: nextPort,
       mllpEnabledOnServer: listenerManager.mllpEnabled,
       sampleAdtMessage: fixtures.adtA01Admit.replace(/\r/g, '\n'),
@@ -207,6 +217,125 @@ function adminRouter({ registry, users, listenerManager, onboarding = null, acco
       }));
     } catch (err) {
       res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: err.message }] });
+    }
+  });
+
+  // Custom REST hospital's own API: sign in, look up one hospital number and
+  // one staff search, suggest the field mapping. A blank password uses the
+  // one stored for hospitalID.
+  router.post('/hospitals/test-custom-api', async (req, res) => {
+    const { hospitalID, hospitalNumber, staffID, ...settings } = req.body || {};
+    try {
+      const stored = hospitalID ? registry.getInternal(hospitalID) : null;
+      const password = settings.password || (stored && stored.customApi && stored._emrSecret) || '';
+      if (!settings.baseUrl || !settings.username || !password) {
+        return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'API address, username and password are required' }] });
+      }
+      const base = String(settings.baseUrl).trim();
+      const hospital = {
+        hospitalID: `test:${hospitalID || base}`,
+        integration: 'rest',
+        customApi: {
+          ...CUSTOM_API_DEFAULTS,
+          ...Object.fromEntries(Object.entries(settings).filter(([, v]) => v !== '' && v != null)),
+          baseUrl: base.endsWith('/') ? base : `${base}/`,
+          fieldMap: Object.fromEntries(Object.entries(settings.fieldMap || {}).filter(([, v]) => v)),
+          password,
+        },
+      };
+      if (!CUSTOM_API_TOKEN_IN.includes(hospital.customApi.tokenIn)) throw new Error('unknown token placement');
+      res.json(await customApi.testConnection(hospital, {
+        hospitalNumber: String(hospitalNumber || '').trim() || undefined,
+        staffID: String(staffID || '').trim() || undefined,
+      }));
+    } catch (err) {
+      res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: err.message }] });
+    }
+  });
+
+  // Live record reading test for a SAVED hospital (custom API or
+  // SmartClinic): reads one patient's records with the record sources
+  // given (or the saved ones) and returns what each source found plus a few
+  // converted records. Nothing is stored; it is real patient data, shown
+  // only to the system admin running the test.
+  router.post('/hospitals/test-records', async (req, res) => {
+    const { hospitalID, hospitalNumber, recordSources, fieldMap } = req.body || {};
+    const steps = [];
+    try {
+      const stored = hospitalID ? registry.getInternal(hospitalID) : null;
+      if (!stored) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'save the hospital first, then test record reading' }] });
+      if (!String(hospitalNumber || '').trim()) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'enter a hospital number to read' }] });
+      const key = stored.integration === 'rest' ? 'customApi' : stored.integration === 'smartclinic' ? 'smartclinic' : null;
+      if (!key || !stored[key]) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'this hospital has no API connection to read records from' }] });
+      const sources = recordSources ? cleanRecordSources(recordSources) : stored[key].recordSources || [];
+      if (!sources.length) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'add at least one record source' }] });
+      const hospital = Object.create(Object.getPrototypeOf(stored), Object.getOwnPropertyDescriptors(stored));
+      hospital.hospitalID = `test:${stored.hospitalID}`;
+      hospital[key] = {
+        ...stored[key],
+        recordSources: sources,
+        fieldMap: { ...(stored[key].fieldMap || {}), ...Object.fromEntries(Object.entries(fieldMap || {}).filter(([, v]) => v)) },
+      };
+      const reader = key === 'customApi' ? customApi.readPatientRecords : smartClinic.readPatientRecords;
+      const out = await reader(hospital, String(hospitalNumber).trim(), {});
+      for (const s of out.sources) {
+        steps.push({
+          step: s.label,
+          ok: s.ok,
+          detail: s.ok
+            ? `${s.count} record(s)${s.dropped ? `; ${s.dropped} belonging to other patients were dropped` : ''}`
+            : s.error,
+        });
+      }
+      const preview = {};
+      for (const r of out.resources) {
+        const label = (r.meta && r.meta.tag && r.meta.tag[0] && r.meta.tag[0].display) || r.resourceType;
+        (preview[label] = preview[label] || []).length < 3 && preview[label].push(r);
+      }
+      res.json({ ok: steps.every((s) => s.ok), steps, preview });
+    } catch (err) {
+      steps.push({ step: 'Read records', ok: false, detail: err.message });
+      res.status(err.status === 400 ? 400 : 200).json({ ok: false, steps });
+    }
+  });
+
+  // "Find records automatically": from one test patient, works out the
+  // record sources for a SAVED custom-API or SmartClinic hospital. Read
+  // only; nothing is stored or saved (the admin reviews and saves).
+  router.post('/hospitals/discover-records', async (req, res) => {
+    const { hospitalID, hospitalNumber, webAppUrl } = req.body || {};
+    try {
+      const stored = hospitalID ? registry.getInternal(hospitalID) : null;
+      if (!stored) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'save the hospital first' }] });
+      if (!String(hospitalNumber || '').trim()) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'enter a test patient’s hospital number' }] });
+      let web;
+      if (webAppUrl) {
+        try {
+          web = new URL(String(webAppUrl).trim());
+          if (!['http:', 'https:'].includes(web.protocol)) throw new Error('bad');
+        } catch {
+          return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'the web app address is not a valid http(s) address' }] });
+        }
+      }
+      const client = stored.integration === 'rest' && stored.customApi ? customApi : stored.integration === 'smartclinic' && stored.smartclinic ? smartClinic : null;
+      if (!client) return res.status(400).json({ ok: false, steps: [{ step: 'Settings', ok: false, detail: 'this hospital has no API connection' }] });
+      const out = await client.discoverRecords(stored, String(hospitalNumber).trim(), { webAppUrl: web && web.href });
+      // One button: what was found is saved straight away (it passes the
+      // same checks as a normal save), so record reading is switched on.
+      let saved = false;
+      if (out.sources.length && req.body.save !== false) {
+        const key = client === customApi ? 'customApi' : 'smartclinic';
+        const { hasPassword, ...current } = stored[key];
+        const fieldMap = { ...(current.fieldMap || {}) };
+        if (!fieldMap.patientId && out.patientIdField) fieldMap.patientId = out.patientIdField;
+        registry.update(stored.hospitalID, {
+          [key]: { ...current, password: '', fieldMap, recordSources: out.sources, ...(key === 'customApi' && out.staffLookupPath ? { staffLookupPath: out.staffLookupPath } : {}) },
+        });
+        saved = true;
+      }
+      res.json({ ok: out.sources.length > 0, saved, ...out });
+    } catch (err) {
+      res.json({ ok: false, sources: [], steps: [{ step: 'Find records', ok: false, detail: err.message }] });
     }
   });
 

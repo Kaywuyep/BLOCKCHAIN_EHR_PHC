@@ -107,6 +107,7 @@ function hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hos
         emrConnected: Boolean(
           hospital &&
             ((hospital.integration === 'smartclinic' && hospital.smartclinic) ||
+              (hospital.integration === 'rest' && hospital.customApi) ||
               (hospital.fhir && hospital.fhir.baseUrl && ['fhir', 'both'].includes(hospital.integration)))
         ),
         passwordAccounts: Boolean(onboarding),

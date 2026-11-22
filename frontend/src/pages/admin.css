@@ -147,3 +147,9 @@ textarea.mono { font: 12px/1.5 var(--font-data); }
 .sample-json { max-height: 260px; overflow: auto; font: 12px/1.45 var(--font-data); background: var(--paper, #f8fafc); padding: 10px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
 .config-block details { margin-top: 10px; }
 .config-block summary { cursor: pointer; font-weight: 500; font-size: 13px; }
+.config-sub { margin: 14px 0 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.record-sources { margin-top: 12px; }
+.record-sources .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.record-source { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; }
+.record-source > summary { cursor: pointer; }
+.ok-text { color: #047857; }

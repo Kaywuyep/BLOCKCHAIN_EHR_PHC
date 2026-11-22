@@ -151,8 +151,21 @@ class OfflineQueue {
       }
       case 'REQUEST_ACCESS':
         return ledger.requestAccess(payload);
-      case 'GRANT_ACCESS':
-        return ledger.grantAccess(payload);
+      case 'GRANT_ACCESS': {
+        // Same audit entry as an online approval, flagged as delayed by an
+        // offline period (FR9: every grant event is audited).
+        const grant = await ledger.grantAccess(payload);
+        await ledger.writeAuditEntry({
+          patientDID: grant.patientDID,
+          eventType: 'GRANT_ISSUED',
+          actorID: grant.patientDID,
+          hospitalID: grant.hospitalID,
+          detail: `Approval queued while offline at ${clientTimestamp}`,
+          clientTimestamp,
+          queuedOffline: true,
+        });
+        return grant;
+      }
       case 'REVOKE_ACCESS': {
         const grant = await ledger.revokeAccess(payload);
         await ledger.writeAuditEntry({

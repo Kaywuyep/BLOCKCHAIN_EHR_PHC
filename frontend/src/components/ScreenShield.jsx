@@ -211,6 +211,8 @@ export function ScreenShield({ children }) {
       if (chordPending && !(e.metaKey && e.shiftKey)) resolveChordAsSuspected();
     };
     const onBeforePrint = () => {
+      // The patient printing their own emergency code card is allowed.
+      if (document.body.classList.contains('ec-printing')) return;
       show();
       reportScreenCapture('print');
     };

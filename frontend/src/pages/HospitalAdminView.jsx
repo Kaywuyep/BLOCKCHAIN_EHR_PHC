@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useSession } from '../auth';
 import { useLedgerEvents } from '../ledgerEvents';
 import { TemporaryPassword } from '../components/TemporaryPassword';
+import { clinicianName } from '../people';
 import './admin.css';
 
 /**
@@ -49,9 +50,6 @@ function fmt(ts) {
   return ts ? new Date(ts).toLocaleString() : '—';
 }
 
-function shortDid(did) {
-  return did && did.length > 26 ? `${did.slice(0, 26)}…` : did;
-}
 
 function useHospitalData(path, params = {}) {
   const { hospitalID } = useContext(HospitalContext);
@@ -181,15 +179,15 @@ function AccessTable({ entries, compact = false }) {
             <tr key={e.entryID} className={e.breakGlass ? 'row-warn' : ''}>
               <td className="nowrap">{fmt(e.timestamp)}{e.queuedOffline && <div className="cell-sub">synced from offline</div>}</td>
               <td>
-                <div className="cell-title">{e.actor.name || e.actor.id}</div>
+                <div className="cell-title">{e.actor.name || (e.actor.kind === 'patient' ? 'Patient' : 'Staff member')}</div>
                 <div className="cell-sub">
-                  {e.actor.role ? `${e.actor.role}${e.actor.department ? ` · ${e.actor.department}` : ''}` : e.actor.kind === 'patient' ? 'patient' : e.actor.id}
+                  {e.actor.role ? `${e.actor.role}${e.actor.department ? ` · ${e.actor.department}` : ''}` : e.actor.kind === 'patient' ? 'patient' : ''}
                   {e.actor.ours === false && e.actor.hospitalName ? ` · ${e.actor.hospitalName}` : ''}
                 </div>
               </td>
               <td>
                 <div className="cell-title">{e.patient.name || 'Not linked here'}</div>
-                <div className="cell-sub mono">{e.patient.hospitalNumber ? `No. ${e.patient.hospitalNumber} · ` : ''}{shortDid(e.patientDID)}</div>
+                {e.patient.hospitalNumber && <div className="cell-sub">No. {e.patient.hospitalNumber}</div>}
               </td>
               <td>
                 {e.recordsAt?.name || e.hospitalID}
@@ -295,12 +293,12 @@ export function HospitalGrants() {
             {(data || []).map((g) => (
               <tr key={g.grantID}>
                 <td>
-                  <div className="cell-title">{g.provider.name || g.providerID}</div>
+                  <div className="cell-title">{g.provider.name || clinicianName(g)}</div>
                   <div className="cell-sub">{g.providerRole || g.provider.role || ''}</div>
                 </td>
                 <td>
                   <div className="cell-title">{g.patient.name || 'Not linked here'}</div>
-                  <div className="cell-sub mono">{shortDid(g.patientDID)}</div>
+                  {g.patient.hospitalNumber && <div className="cell-sub">No. {g.patient.hospitalNumber}</div>}
                 </td>
                 <td>
                   <div>{g.recordsAt?.name} → {g.viewedFrom?.name || '—'}</div>
@@ -667,7 +665,6 @@ export function HospitalPatients() {
               <tr key={p.patientDID}>
                 <td>
                   <div className="cell-title">{p.name || '—'}</div>
-                  <div className="cell-sub mono">{shortDid(p.patientDID)}</div>
                 </td>
                 <td className="mono">{p.hospitalNumber}</td>
                 <td className="cell-sub nowrap">{fmt(p.linkedAt)}</td>

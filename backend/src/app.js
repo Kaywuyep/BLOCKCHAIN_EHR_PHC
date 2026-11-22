@@ -1,5 +1,7 @@
 'use strict';
 
+const { createNameResolver } = require('./services/nameResolver');
+
 const { randomUUID } = require('crypto');
 const express = require('express');
 const cors = require('cors');
@@ -340,6 +342,15 @@ function createApp({
     });
   }
 
+  // People's names next to their IDs in every API answer (display and
+  // audit); the IDs stay for the system. Patients are never resolved.
+  const names = createNameResolver({ providerRegistry, userDirectory, hospitalRegistry });
+  app.use('/api', (req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body) => json(names.enrich(body));
+    next();
+  });
+
   // ── API ────────────────────────────────────────────────────────────────
   app.use('/api/patients', patientsRouter(ledgerPromise, fhirAdapter, linkageService, identityStore, referenceService, { hospitalRegistry, logger }));
   app.use('/api/providers', providersRouter(providerRegistry));
@@ -351,7 +362,7 @@ function createApp({
   app.use('/api/hl7', hl7Router(fhirAdapter, inbox, hospitalRegistry));
   app.use('/api/hospitals', hospitalsRouter(hospitalRegistry));
   app.use('/api/ingest', ingestRouter(fhirAdapter, hospitalRegistry));
-  app.use('/api/events', eventsRouter(ledgerPromise));
+  app.use('/api/events', eventsRouter(ledgerPromise, { names }));
   app.use('/api/hospital-admin', hospitalAdminRouter({ ledgerPromise, fhirAdapter, providerRegistry, hospitalRegistry, db, cipher, onboarding: passwordMode ? onboarding : null, accounts: passwordMode ? accounts : null }));
   // Diagnosis catalogue + anonymous counts (Insights). Keyed hashes use a
   // key derived from the field-encryption key.

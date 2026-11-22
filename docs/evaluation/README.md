@@ -10,6 +10,7 @@ created network (`docker compose down -v`, `network-up.sh`, `deployChaincode.sh`
 | `results-fabric-500ms.json` | evaluate.js, Fabric, BatchTimeout 500 ms | `BatchTimeout: 500ms` in `network/configtx.yaml`, then as below |
 | `results-simulated.json` | evaluate.js against the simulated ledger (baseline) | as below with `LEDGER_MODE=simulated`, without `--fabric` |
 | `dockerstats-fabric-*.txt` | container memory at the end of each Fabric run | `docker stats --no-stream` |
+| `results-simulated-30patients-run{1,2,3}.json` | evaluate.js, simulated ledger, 30 patients, three independent runs on the final code (17 November 2026, tag `thesis-submission`) | as below with `LEDGER_MODE=simulated`, `--patients 30`, without `--fabric`, a new empty data directory per run |
 | `acceptance-fabric.txt` | 57 role-by-role acceptance checks (Table 5.2) | `backend/scripts/acceptance.js` on a freshly seeded Fabric demo world |
 | `page-sweep-fabric.txt` | browser pass through every page for each demo account | `frontend/scripts/page-sweep.cjs` |
 
@@ -25,3 +26,8 @@ node scripts/evaluate.js --base http://localhost:4600 --mllp-a 5101 --mllp-b 510
 
 The figures in Chapter Five (authorisation latency; batching with the fitted
 cost model) are drawn directly from these JSON files.
+
+The three 30-patient runs were added on 17 November 2026 to repeat the
+functional results on the final code. They report the replay-audit fix
+(10 of 15 queued actions flagged `queuedOffline`); the 14 November Fabric
+runs predate that fix and flag 5.

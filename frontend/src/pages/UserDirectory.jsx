@@ -217,10 +217,9 @@ export function UserDirectory() {
               {shown.map((u) => (
                 <tr key={u.subject} className={u.status === 'disabled' ? 'row-muted' : ''}>
                   <td>
-                    <div className="cell-title">{u.displayName || u.subject}</div>
+                    <div className="cell-title">{u.displayName || u.login || 'Unnamed account'}</div>
                     <div className="cell-sub">
-                      {u.login || (u.displayName && u.subject)}
-                      {u.patientDID && <span className="mono"> {u.patientDID.length > 28 ? `${u.patientDID.slice(0, 28)}…` : u.patientDID}</span>}
+                      {u.login || ''}
                       {u.department && ` · ${u.department}`}
                     </div>
                   </td>

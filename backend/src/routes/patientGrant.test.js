@@ -205,3 +205,35 @@ test('patient can grant multiple hospitals and then revoke one', async () => {
     await server.close();
   }
 });
+
+test('the patient extends a doctor\'s active access by 24 hours (same doctor, hospitals, record types); others cannot', async () => {
+  const server = await createTestServer({ authMode: 'local' });
+  try {
+    server.ledger.registerPatient({ patientDID: 'did:patientchain:p1', publicKey: 'pk1' });
+    server.identityStore.bind('amina', 'did:patientchain:p1');
+    server.ledger.requestAccess({
+      grantID: 'g-old', patientDID: 'did:patientchain:p1', providerID: 'dr-bello', hospitalID: 'general-hospital-wase',
+      scope: ['Observation', 'MedicationRequest'], purpose: 'Treatment', requesterHospitalID: 'general-hospital-langtang',
+    });
+    server.ledger.grantAccess({ grantID: 'g-old', durationMinutes: 60 });
+
+    const doctor = await server.login({ subject: 'dr-bello', role: 'clinician', hospitalID: 'general-hospital-langtang' });
+    assert.equal((await postJson(`${server.baseUrl}/api/access/g-old/patient-extend`, { grantID: 'g-new-00001' }, doctor)).status, 403);
+
+    const patient = await server.login({ subject: 'amina', role: 'patient' });
+    const res = await postJson(`${server.baseUrl}/api/access/g-old/patient-extend`, { grantID: 'g-new-00001' }, patient);
+    assert.equal(res.status, 201, await res.clone().text());
+    const g = await res.json();
+    assert.equal(g.status, 'ACTIVE');
+    assert.equal(g.providerID, 'dr-bello');
+    assert.equal(g.hospitalID, 'general-hospital-wase');
+    assert.equal(g.requesterHospitalID, 'general-hospital-langtang');
+    assert.deepEqual(g.scope, ['Observation', 'MedicationRequest']);
+    const hours = (new Date(g.expiresAt) - Date.now()) / 3600000;
+    assert.ok(hours > 23.9 && hours <= 24.01, `expires in ${hours} h`);
+    const audit = server.ledger.getAuditTrailForPatient('did:patientchain:p1');
+    assert.ok(audit.some((e) => e.eventType === 'GRANT_EXTENDED' && /renews g-old/.test(e.detail)));
+  } finally {
+    await server.close();
+  }
+});

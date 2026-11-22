@@ -80,7 +80,7 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
   await test.step('the emergency records are usable at once, with no patient approval step', async () => {
     await clinicianPage.getByRole('link', { name: 'Open emergency records' }).click();
     await expect(card.locator('.vr-chip.emergency')).toHaveText('Emergency access');
-    await expect(card.locator('.vr-status')).toHaveText('ACTIVE');
+    await expect(card.locator('.vr-status')).toHaveText('Active');
     await expect(card.locator('.vr-when')).toHaveText(/^(60|59) min left$/);
     await card.locator('button.vr-toggle', { hasText: 'Open records' }).click();
     await expect(card.getByText('Access verified on the blockchain and logged')).toBeVisible();
@@ -104,8 +104,8 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
     const patientPage = await (await browser.newContext()).newPage();
     await signIn(patientPage, { role: 'patient', subject: patientSubject });
     await gotoNav(patientPage, 'Access Control');
-    const row = patientPage.locator('.pa-em-row').filter({ hasText: providerID });
-    await expect(row).toContainText(`${providerID} at ${H.langtang.name} opened your records from ${H.wase.name}`);
+    const row = patientPage.locator('.pa-em-row').filter({ hasText: 'Dr Emergency' }); // names, not IDs, on screen
+    await expect(row).toContainText(`Dr Emergency at ${H.langtang.name} opened your records from ${H.wase.name}`);
     await expect(row).toContainText('awaiting hospital review');
     await expect(row).toContainText(`Reason: ${reason}`);
     await expect(row).toContainText(`Extended +30 min: ${extendReason}`);
@@ -116,7 +116,7 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
     const page = await (await browser.newContext()).newPage();
     await signIn(page, { role: 'hospital_admin', subject: `admin-lag-${t}`, hospitalID: H.langtang.id });
     await gotoNav(page, 'Break-Glass Review');
-    const entry = page.locator('.bg-review').filter({ hasText: did });
+    const entry = page.locator('.bg-review').filter({ hasText: reason }) /* patient shown by name, not Health ID */;
     await expect(entry.locator('.bg-review-head .pill')).toHaveText('Our clinician opened another hospital’s records');
     await page.context().close();
   });
@@ -125,9 +125,10 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
     const adminPage = await (await browser.newContext()).newPage();
     await signIn(adminPage, { role: 'hospital_admin', subject: `admin-was-${t}`, hospitalID: H.wase.id });
     await gotoNav(adminPage, 'Break-Glass Review');
-    const entry = adminPage.locator('.bg-review').filter({ hasText: did });
+    const entry = adminPage.locator('.bg-review').filter({ hasText: reason }) /* patient shown by name, not Health ID */;
     await expect(entry.locator('.bg-review-head .pill')).toHaveText('Our records opened by another hospital');
-    await expect(entry).toContainText(`${providerID} (${H.langtang.name})`);
+    await expect(entry).toContainText(`Dr Emergency (Physician) · ${H.langtang.name}`);
+    await expect(entry).toContainText(`Patient ${name}`);
     await expect(entry).toContainText(`Records at ${H.wase.name}`);
     await expect(entry).toContainText(`Reason ${reason}`);
     // The representative's details are off-chain; their hash is on the ledger.
@@ -137,7 +138,7 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
 
     await entry.getByPlaceholder('Review notes').fill('Confirmed legitimate emergency');
     await entry.getByRole('button', { name: 'Mark reviewed' }).click();
-    await expect(adminPage.locator('.bg-review').filter({ hasText: did })).toHaveCount(0);
+    await expect(adminPage.locator('.bg-review').filter({ hasText: reason }) /* patient shown by name, not Health ID */).toHaveCount(0);
     await adminPage.context().close();
   });
 
@@ -145,7 +146,7 @@ test('break-glass: emergency access by hospital number is immediate, extendable,
     const patientPage = await (await browser.newContext()).newPage();
     await signIn(patientPage, { role: 'patient', subject: patientSubject });
     await gotoNav(patientPage, 'Access Control');
-    await expect(patientPage.locator('.pa-em-row').filter({ hasText: providerID })).toContainText('reviewed by the hospital');
+    await expect(patientPage.locator('.pa-em-row').filter({ hasText: 'Dr Emergency' })).toContainText('reviewed by the hospital');
     await patientPage.context().close();
   });
 

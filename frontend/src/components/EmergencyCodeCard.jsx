@@ -40,6 +40,16 @@ export function EmergencyCodeCard({ patientDID }) {
     try { await navigator.clipboard.writeText(code.code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   }
 
+  // Prints only this card (see emergencyCode.css); the screen shield lets
+  // this one print through because it is the patient's own code.
+  function printCard() {
+    const done = () => document.body.classList.remove('ec-printing');
+    document.body.classList.add('ec-printing');
+    window.addEventListener('afterprint', done, { once: true });
+    window.print();
+    setTimeout(done, 1000);
+  }
+
   return (
     <div className="panel ec-card">
       <div className="panel-head">
@@ -54,12 +64,12 @@ export function EmergencyCodeCard({ patientDID }) {
       {code && (
         <div className="ec-print">
           <div className="ec-code-row">
-            <span className={`ec-code ${shown ? '' : 'hidden'}`} aria-label={shown ? `Emergency code ${code.code.split('').join(' ')}` : 'Emergency code hidden'}>
+            <span className={`ec-code ${shown ? '' : 'hidden'}`} data-allow-copy aria-label={shown ? `Emergency code ${code.code.split('').join(' ')}` : 'Emergency code hidden'}>
               {shown ? code.code : '•••••••'}
             </span>
             <button className="btn btn-ghost" onClick={() => setShown((v) => !v)}>{shown ? 'Hide' : 'Show'}</button>
             {shown && <button className="btn btn-ghost" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>}
-            {shown && <button className="btn btn-ghost" onClick={() => window.print()}>Print card</button>}
+            {shown && <button className="btn btn-ghost" onClick={printCard}>Print card</button>}
           </div>
           <div className="hint">Created {new Date(code.createdAt).toLocaleDateString('en-NG')}</div>
         </div>

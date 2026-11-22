@@ -61,7 +61,7 @@ A wrong number or a wrong date of birth gives the same "No matching record found
 - **Cevruni only lets a clinician at one hospital view a patient's records held at another hospital**, and only if the patient has **both** hospitals in their network.
 - **Two ways in:**
   - the patient approves a request (or shares ahead of time with a whole hospital);
-  - **break-glass** in an emergency. This lasts 1 hour, covers emergency record types only (allergies, medications, diagnoses, encounters, labs), and can be extended with a reason up to 24 hours. Both hospitals' admins and the patient see it.
+  - **break-glass** in an emergency. This lasts 1 hour, covers all record types (changed 2026-11-18; previously emergency types only), and can be extended with a reason up to 24 hours. Both hospitals' admins and the patient see it.
 
 The legal reasoning is in `docs/legal-basis-emergency-access.md`.
 

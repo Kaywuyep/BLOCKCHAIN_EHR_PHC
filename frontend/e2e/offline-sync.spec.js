@@ -81,7 +81,7 @@ test('offline sync: a queued request survives a disconnect and replays on reconn
 
       await gotoNav(clinicianPage, 'View Records');
       const card = clinicianPage.locator('.vr-card').filter({ hasText: name });
-      await expect(card.locator('.vr-status')).toHaveText('PENDING');
+      await expect(card.locator('.vr-status')).toHaveText('Awaiting patient');
       await expect(card).toContainText('Awaiting patient');
     });
   } finally {

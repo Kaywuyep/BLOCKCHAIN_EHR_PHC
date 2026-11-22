@@ -11,6 +11,7 @@ import { Watermark } from './components/Watermark';
 import { api } from './api';
 import { useLedgerEvents } from './ledgerEvents';
 import { useMediaQuery, useTableLabels } from './responsive';
+import { PrivacyGuard } from './components/PrivacyGuard';
 import { SessionContext, allowedTabs, completeOidcRedirect, fetchAuthConfig, fetchSession, logout } from './auth';
 
 const NAV_ITEMS = {
@@ -172,6 +173,7 @@ export default function App() {
   return (
     <SessionContext.Provider value={sessionValue}>
       <Watermark session={authOn ? session : null} demo={!authOn} />
+      <PrivacyGuard session={authOn ? session : null} />
       <div className={`app-layout ${bottomNav(currentSection) ? 'has-bottom-nav' : ''}`}>
         {compact && navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
         {/* Sidebar (a slide-out menu on phones and tablets) */}

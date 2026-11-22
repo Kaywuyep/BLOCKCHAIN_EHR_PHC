@@ -3,6 +3,29 @@
 const express = require('express');
 const { isProvider, deny } = require('../auth/policy');
 const { fetchPatientResources } = require('../services/liveFhirClient');
+const customApi = require('../services/customApiClient');
+const smartClinic = require('../services/smartClinicClient');
+
+// Live reads from a hospital's own API stop waiting after this long, so a
+// slow or unreachable hospital network doesn't hang the clinician's page.
+const LIVE_EMR_TIMEOUT_MS = Number(process.env.LIVE_EMR_TIMEOUT_MS) || 120 * 1000;
+
+function withDeadline(promise, ms) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the hospital's system did not answer within ${Math.round(ms / 1000)}s: is the Cevruni server on the hospital network?`)), ms);
+  });
+  promise.catch(() => {});
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+/** The reader for a hospital whose own (non-FHIR) API Cevruni reads records from, or null. */
+function liveEmrReader(hospital) {
+  if (!hospital || hospital.status !== 'active') return null;
+  if (hospital.integration === 'rest' && hospital.customApi && (hospital.customApi.recordSources || []).length) return customApi.readPatientRecords;
+  if (hospital.integration === 'smartclinic' && hospital.smartclinic && (hospital.smartclinic.recordSources || []).length) return smartClinic.readPatientRecords;
+  return null;
+}
 
 // Table 3.6. Administrative resources give identity context for a record
 // and are always returned; clinical ones only if the grant's scope allows.
@@ -109,12 +132,18 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalReg
       // Step 1c: scope check (Section 8). Only enforced when the caller
       // declares which FHIR resource types it's asking for *and* the
       // grant recorded a scope restriction.
-      if (resourceTypes && Array.isArray(grant.scope) && grant.scope.length) {
+      // Emergency access shows ALL record types (user decision, 2026-11-18,
+      // replacing the earlier emergency-types-only rule). The grant on the
+      // ledger may still list the old emergency types until the chaincode is
+      // upgraded; this server applies "all", and each emergency opening is
+      // logged on-chain as "all record types".
+      const scope = grant.grantType === 'BREAK_GLASS' ? [] : grant.scope;
+      if (resourceTypes && Array.isArray(scope) && scope.length) {
         const requested = resourceTypes.split(',').map((t) => t.trim()).filter(Boolean);
-        const outOfScope = requested.filter((t) => !grant.scope.includes(t));
+        const outOfScope = requested.filter((t) => !scope.includes(t));
         if (outOfScope.length) {
           return res.status(403).json({
-            error: `requested resource type(s) [${outOfScope.join(', ')}] are outside the granted scope [${grant.scope.join(', ')}]`,
+            error: `requested resource type(s) [${outOfScope.join(', ')}] are outside the granted scope [${scope.join(', ')}]`,
           });
         }
       }
@@ -130,7 +159,7 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalReg
       // only the resource types the grant allows (Section 3.4.8).
       const hospital = hospitalRegistry ? hospitalRegistry.getInternal(hospitalID) : null;
       if (hospital && hospital.status === 'active' && hospital.fhir && (hospital.integration === 'fhir' || hospital.integration === 'both')) {
-        const types = Array.isArray(grant.scope) && grant.scope.length ? grant.scope.filter((t) => CLINICAL_TYPES.includes(t)) : CLINICAL_TYPES;
+        const types = Array.isArray(scope) && scope.length ? scope.filter((t) => CLINICAL_TYPES.includes(t)) : CLINICAL_TYPES;
         try {
           const resources = await fetchPatientResources(hospital, mrn, types);
           allBundles = allBundles.concat([
@@ -142,8 +171,32 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalReg
         }
       }
 
+      // Hospitals whose own API we read (custom-built systems, SmartClinic):
+      // read live now, show, keep nothing. The hospital's database stays
+      // the only copy of the record.
+      const readLive = liveEmrReader(hospital);
+      if (readLive) {
+        const types = Array.isArray(scope) && scope.length ? scope.filter((t) => CLINICAL_TYPES.includes(t)) : CLINICAL_TYPES;
+        try {
+          const out = await withDeadline(readLive(hospital, mrn, { types }), LIVE_EMR_TIMEOUT_MS);
+          allBundles = allBundles.concat([
+            { resourceType: 'Bundle', type: 'searchset', id: `live-${grantID}`, timestamp: new Date().toISOString(), entry: out.resources.map((resource) => ({ resource })) },
+          ]);
+          const failed = out.sources.filter((x) => !x.ok);
+          liveSource = {
+            ok: failed.length === 0,
+            kind: 'emr',
+            resources: out.resources.length,
+            sources: out.sources.map(({ label, ok, count, error }) => ({ label, ok, count, ...(error ? { error } : {}) })),
+            ...(failed.length ? { error: failed.map((x) => `${x.label}: ${x.error}`).join('; ') } : {}),
+          };
+        } catch (err) {
+          liveSource = { ok: false, kind: 'emr', error: err.message };
+        }
+      }
+
       // Step 1c': return only what the grant covers (record-type scope).
-      const { bundles, withheld } = filterByScope(allBundles, grant.scope);
+      const { bundles, withheld } = filterByScope(allBundles, scope);
 
       // Step 5/6: log the access event immutably. The record itself is
       // returned to the caller but never written to the ledger.
@@ -152,7 +205,7 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalReg
         eventType: 'RECORD_ACCESSED',
         actorID: viewer || grant.providerID,
         hospitalID,
-        detail: `${grant.grantType === 'BREAK_GLASS' ? 'EMERGENCY ' : ''}records opened from ${viewerHospital} via grant ${grantID}${withheld ? `; ${withheld} out-of-scope resource(s) withheld` : ''}${liveSource ? `; live FHIR ${liveSource.ok ? 'ok' : 'failed'}` : ''}`,
+        detail: `${grant.grantType === 'BREAK_GLASS' ? 'EMERGENCY (all record types) ' : ''}records opened from ${viewerHospital} via grant ${grantID}${withheld ? `; ${withheld} out-of-scope resource(s) withheld` : ''}${liveSource ? `; live ${liveSource.kind === 'emr' ? 'hospital API' : 'FHIR'} ${liveSource.ok ? 'ok' : 'failed'}` : ''}`,
         clientTimestamp: new Date().toISOString(),
         queuedOffline: false,
       });
@@ -167,7 +220,7 @@ function recordsRouter(ledgerPromise, fhirAdapter, providerRegistry, hospitalReg
           note: 'MRN is resolved locally by the FHIR Adapter and never leaves this hospital; it is never written on-chain.',
         },
         bundles,
-        scope: Array.isArray(grant.scope) && grant.scope.length ? grant.scope : 'all',
+        scope: Array.isArray(scope) && scope.length ? scope : 'all',
         withheld,
         ...(liveSource ? { liveSource } : {}),
       });

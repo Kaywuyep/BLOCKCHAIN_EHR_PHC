@@ -5,10 +5,12 @@ const { ROLES } = require('../auth/auth');
 const { AccountError } = require('./accountStore');
 const { fetchPractitioner, searchPractitioners } = require('./liveFhirClient');
 const smartClinic = require('./smartClinicClient');
+const customApi = require('./customApiClient');
 
 /** Staff lookup in the hospital's own EMR, whichever kind it is. `hints` (email, name) speed up SmartClinic. */
 function fetchFromEmr(hospital, staffID, { hints = [] } = {}) {
   if (hospital.integration === 'smartclinic') return smartClinic.fetchStaff(hospital, staffID, { hints });
+  if (hospital.integration === 'rest') return customApi.fetchStaff(hospital, staffID, { hints });
   return fetchPractitioner(hospital, staffID);
 }
 
@@ -120,6 +122,7 @@ class Onboarding {
   static hasEmr(hospital) {
     if (!hospital) return false;
     if (hospital.integration === 'smartclinic') return Boolean(hospital.smartclinic && hospital.smartclinic.baseUrl);
+    if (hospital.integration === 'rest') return Boolean(hospital.customApi && hospital.customApi.baseUrl && hospital.customApi.staffSearchPath);
     return Boolean(hospital.fhir && hospital.fhir.baseUrl && ['fhir', 'both'].includes(hospital.integration));
   }
 
@@ -131,12 +134,12 @@ class Onboarding {
     query = String(query || '').trim();
     if (query.length < 2 || query.length > 80) fail('type at least 2 characters of a staff ID or name');
     const hospital = this._hospitalForStaff(hospitalID);
-    if (!Onboarding.hasEmr(hospital)) fail('this hospital has no connection to its EMR (FHIR or SmartClinic); ask the system admin to set one up');
+    if (!Onboarding.hasEmr(hospital)) fail('this hospital has no connection to its EMR (FHIR, SmartClinic or a custom API); ask the system admin to set one up');
     let found;
     try {
-      found = hospital.integration === 'smartclinic'
-        ? await smartClinic.searchStaff(hospital, query)
-        : await searchPractitioners(hospital, query);
+      if (hospital.integration === 'smartclinic') found = await smartClinic.searchStaff(hospital, query);
+      else if (hospital.integration === 'rest') found = await customApi.searchStaff(hospital, query);
+      else found = await searchPractitioners(hospital, query);
     } catch (err) {
       fail(`EMR search failed: ${err.message}`, 502);
     }
@@ -155,7 +158,7 @@ class Onboarding {
     staffID = String(staffID || '').trim();
     if (!STAFF_ID_PATTERN.test(staffID)) fail('staff ID may contain letters, digits and . _ - / (max 64)');
     const hospital = this._hospitalForStaff(hospitalID);
-    if (!Onboarding.hasEmr(hospital)) fail('this hospital has no connection to its EMR (FHIR or SmartClinic); ask the system admin to set one up');
+    if (!Onboarding.hasEmr(hospital)) fail('this hospital has no connection to its EMR (FHIR, SmartClinic or a custom API); ask the system admin to set one up');
     try {
       return await this.fetchStaff(hospital, staffID, { hints: hint ? [String(hint).trim().slice(0, 120)] : [] });
     } catch (err) {

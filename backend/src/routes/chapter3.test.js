@@ -323,7 +323,7 @@ test('NFR9: both hospitals see who accessed which patient; break-glass needs bot
     });
     assert.equal(bg.status, 201, JSON.stringify(bg.body));
     assert.equal(bg.body.patientName, 'Amina Yusuf');
-    assert.deepEqual(bg.body.scope, ['AllergyIntolerance', 'MedicationRequest', 'Condition', 'Encounter', 'Observation']);
+    assert.deepEqual(bg.body.scope, []); // emergency access covers all record types (2026-11-18)
     assert.equal(new Date(bg.body.expiresAt) - new Date(bg.body.grantedAt), 3600 * 1000);
 
     // Requesting hospital (A): its clinician's activity.

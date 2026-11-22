@@ -153,6 +153,16 @@ export async function signIn(page, { role, subject, hospitalID }) {
   if (hospitalID) await loginField(page, 'Hospital ID').locator('input').fill(hospitalID);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.locator('.sidebar-user-name')).toHaveText(subject);
+  // Staff confirm the confidentiality notice once per sign-in (PrivacyGuard).
+  if (role !== 'patient') await acknowledgeConfidentiality(page);
+}
+
+/** Staff: confirm the "Confidential patient information" notice shown after sign-in. */
+export async function acknowledgeConfidentiality(page) {
+  const notice = page.getByRole('dialog', { name: 'Confidentiality notice' });
+  await expect(notice).toBeVisible();
+  await notice.getByRole('button', { name: 'I understand and agree' }).click();
+  await expect(notice).toHaveCount(0);
 }
 
 /** My Health ID: look up the first hospital's record (does not confirm). */

@@ -13,8 +13,14 @@
 .ec-hospitals { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .ec-hospital { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; cursor: pointer; font-size: 14px; }
 .ec-hospital.selected { border-color: var(--rust); background: var(--rust-bg); }
+/* "Print card" prints only the patient's own code card. Scoped to the
+   ec-printing class set by the button, so it never affects other printing
+   (which the screen shield replaces with noise). */
 @media print {
-  body * { visibility: hidden; }
-  .ec-print, .ec-print * { visibility: visible; }
-  .ec-print { position: absolute; left: 0; top: 0; }
+  body.ec-printing .screen-shield-content { display: block !important; }
+  body.ec-printing .screen-shield-print { display: none !important; }
+  body.ec-printing * { visibility: hidden; }
+  body.ec-printing .ec-print, body.ec-printing .ec-print * { visibility: visible; }
+  body.ec-printing .ec-print { position: absolute; left: 0; top: 0; }
+  body.ec-printing .ec-print button { display: none; }
 }

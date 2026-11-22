@@ -19,5 +19,8 @@
 module.exports = {
   BREAK_GLASS_MINUTES: 60,
   BREAK_GLASS_MAX_MINUTES: 24 * 60,
-  EMERGENCY_SCOPE: ['AllergyIntolerance', 'MedicationRequest', 'Condition', 'Encounter', 'Observation'],
+  // Empty = all record types (user decision, 2026-11-18). The Fabric
+  // chaincode still stamps the old five types until it is upgraded; the
+  // records route applies "all" for every emergency grant either way.
+  EMERGENCY_SCOPE: [],
 };

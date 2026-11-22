@@ -10,6 +10,7 @@ import { ensureKeyPair, keysSupported, newGrantID, publicKeyOnDevice, signGrant,
 
 // A P-256 SPKI public key in base64 always starts with this prefix.
 const SPKI_P256 = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE';
+import { clinicianName, actorName } from '../people';
 import { useScreenCaptureSubject } from '../components/screenCaptureAudit';
 
 export function PatientApp() {
@@ -280,12 +281,33 @@ export function PatientApp() {
     setLoading(true);
     setError(null);
     try {
-      await api.revokeAccess(grant.grantID, {
-        patientDID: grant.patientDID,
-        hospitalID: grant.hospitalID,
-        actorID: grant.patientDID,
-        signature: await sigFor(() => signRevoke(account, grant.grantID)),
-      });
+      // An extended access has older approvals still running: end them all.
+      const group = (grant._group && grant._group.length ? grant._group : [grant]);
+      for (const g of group) {
+        await api.revokeAccess(g.grantID, {
+          patientDID: g.patientDID,
+          hospitalID: g.hospitalID,
+          actorID: g.patientDID,
+          signature: await sigFor(() => signRevoke(account, g.grantID)),
+        });
+      }
+      await loadAll(patientDID);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Extend a doctor's current access by 24 hours from now: a fresh approval
+  // for the same doctor, hospitals and record types, signed here.
+  async function handleExtend(grant) {
+    setLoading(true);
+    setError(null);
+    try {
+      const newID = crypto.randomUUID();
+      const signature = await sigFor(() => signGrant(account, newID, 1440));
+      await api.extendGrant(grant.grantID, { grantID: newID, signature });
       await loadAll(patientDID);
     } catch (e) {
       setError(e.message);
@@ -343,7 +365,7 @@ export function PatientApp() {
   const grantEntries = grants.map((g) => ({
     id: g.grantID,
     status: g.status,
-    title: `${g.providerID} @ ${hospitalName(g.hospitalID)}`,
+    title: `${clinicianName(g)} @ ${hospitalName(g.hospitalID)}`,
     subtitle:
       g.status === 'ACTIVE'
         ? `Expires ${new Date(g.expiresAt).toLocaleString()}`
@@ -356,7 +378,22 @@ export function PatientApp() {
   }));
 
   const pendingGrants = grants.filter(g => g.status === 'PENDING');
-  const activeGrants = grants.filter(g => g.status === 'ACTIVE');
+  const activeGrants = grants.filter(g => g.status === 'ACTIVE' && (!g.expiresAt || new Date(g.expiresAt) > new Date()));
+  // One line per doctor and pair of hospitals: an extension leaves the
+  // older approval running until it ends, so show the latest and keep the
+  // group (Revoke ends them all).
+  const currentAccess = Object.values(
+    activeGrants
+      .filter((g) => g.grantType !== 'BREAK_GLASS')
+      .reduce((acc, g) => {
+        const k = `${g.providerID}|${g.hospitalID}|${g.requesterHospitalID}`;
+        const prev = acc[k];
+        const group = [...(prev ? prev._group : []), g];
+        const latest = !prev || new Date(g.expiresAt) > new Date(prev.expiresAt) ? g : prev;
+        acc[k] = { ...latest, _group: group };
+        return acc;
+      }, {})
+  );
   const revokedGrants = grants.filter(g => g.status === 'REVOKED' || g.status === 'EXPIRED');
   const emergencyGrants = grants.filter((g) => g.grantType === 'BREAK_GLASS');
 
@@ -662,14 +699,14 @@ export function PatientApp() {
           {emergencyGrants.length > 0 && (
             <div className="panel pa-emergency">
               <div className="panel-head"><div><span className="eyebrow">Emergency access to your records</span><h2>Opened without your approval</h2></div></div>
-              <p className="hint">In an emergency, when you could not consent, a clinician may open your essential records (allergies, medications, diagnoses, encounters, lab results) from another hospital in your network for a limited time. Every case is logged and reviewed by the hospitals.</p>
+              <p className="hint">In an emergency, when you could not consent, a clinician may open all your records from another hospital in your network for a limited time. Every case is logged and reviewed by the hospitals.</p>
               {emergencyGrants.map((g) => {
                 const d = emergencyInfo[g.grantID];
                 return (
                   <div key={g.grantID} className="pa-em-row">
                     <div className="pa-em-icon">{'\u{1F6A8}'}</div>
                     <div style={{ flex: 1 }}>
-                      <div><strong>{g.providerID}</strong> at <strong>{g.viewedFromName}</strong> opened your records from <strong>{g.recordsAtName}</strong></div>
+                      <div><strong>{clinicianName(g)}</strong> at <strong>{g.viewedFromName}</strong> opened your records from <strong>{g.recordsAtName}</strong></div>
                       <div className="hint">{new Date(g.grantedAt).toLocaleString()} · {g.status === 'ACTIVE' ? `active until ${new Date(g.expiresAt).toLocaleString()}` : 'ended'}{g.reviewed ? ' · reviewed by the hospital' : ' · awaiting hospital review'}</div>
                       <div className="hint">Reason: {g.justification}</div>
                       {d?.representative && <div className="hint">Asked for by your {d.representative.relationship || 'representative'} {d.representative.name}{d.representative.phone ? ` (${d.representative.phone})` : ''}</div>}
@@ -696,7 +733,7 @@ export function PatientApp() {
               <div key={g.grantID} className="pa-req">
                 <div className="pa-req-icon">{'\u{1F514}'}</div>
                 <div style={{ flex: 1 }}>
-                  <div className="pa-req-title"><strong>{g.providerID}</strong>{g.providerRole ? ` (${g.providerRole})` : ''} at <strong>{g.viewedFromName}</strong> asks to see your records from <strong>{g.recordsAtName}</strong></div>
+                  <div className="pa-req-title"><strong>{clinicianName(g)}</strong>{g.providerRole ? ` (${g.providerRole})` : ''} at <strong>{g.viewedFromName}</strong> asks to see your records from <strong>{g.recordsAtName}</strong></div>
                   <div className="hint">Purpose: {g.purpose} · Record types: {g.scope && g.scope.length ? g.scope.join(', ') : 'all'} · asked {new Date(g.requestedAt).toLocaleString()}</div>
                 </div>
                 <div className="pa-req-actions">
@@ -744,19 +781,22 @@ export function PatientApp() {
 
           {/* Active grants */}
           <div className="panel">
-            <div className="panel-head"><div><span className="eyebrow">Currently allowed</span><h2>Who can see what ({activeGrants.filter((g) => g.grantType !== 'BREAK_GLASS').length})</h2></div></div>
-            {activeGrants.filter((g) => g.grantType !== 'BREAK_GLASS').length === 0 && <p className="hint">Nobody has access to your records at another hospital.</p>}
-            {activeGrants.filter((g) => g.grantType !== 'BREAK_GLASS').map((g) => (
+            <div className="panel-head"><div><span className="eyebrow">Currently allowed</span><h2>Who can see what ({currentAccess.length})</h2></div></div>
+            {currentAccess.length === 0 && <p className="hint">Nobody has access to your records at another hospital.</p>}
+            {currentAccess.map((g) => (
               <div key={g.grantID} className="pa-active">
                 <div style={{ flex: 1 }}>
-                  <strong>{g.providerID.startsWith('hospital-staff@') ? `All clinicians at ${g.viewedFromName}` : `${g.providerID} at ${g.viewedFromName}`}</strong>
+                  <strong>{g.providerID.startsWith('hospital-staff@') ? `All clinicians at ${g.viewedFromName}` : `${clinicianName(g)}${g.providerRole ? ` (${g.providerRole})` : ''} at ${g.viewedFromName}`}</strong>
                   <span className="hint"> can see your <strong>{g.recordsAtName}</strong> records</span>
                   <div className="hint">
                     {g.scope && g.scope.length ? g.scope.join(', ') : 'all record types'} · {g.purpose} · until {new Date(g.expiresAt).toLocaleString()}
                     {g.patientSigned && ' · signed by you ✓'}
                   </div>
                 </div>
-                <button className="btn btn-danger" onClick={() => handleRevoke(g)} disabled={loading}>Revoke</button>
+                <div className="pa-active-actions">
+                  <button className="btn btn-ghost" onClick={() => handleExtend(g)} disabled={loading} title="Give 24 more hours from now">Extend 24 h</button>
+                  <button className="btn btn-danger" onClick={() => handleRevoke(g)} disabled={loading}>Revoke</button>
+                </div>
               </div>
             ))}
           </div>
@@ -766,7 +806,7 @@ export function PatientApp() {
               <div className="panel-head"><div><span className="eyebrow">History</span><h2>Past grants</h2></div></div>
               {revokedGrants.map((g) => (
                 <div className="data-row" key={g.grantID}>
-                  <span className="k">{g.providerID} ({g.viewedFromName}) — {g.recordsAtName} records — {g.purpose}</span>
+                  <span className="k">{clinicianName(g)} ({g.viewedFromName}) — {g.recordsAtName} records — {g.purpose}</span>
                   <span className="v" style={{ color: 'var(--rust)' }}>{g.status === 'REVOKED' && !g.grantedAt ? 'DECLINED' : g.status}</span>
                 </div>
               ))}
@@ -788,7 +828,7 @@ export function PatientApp() {
             {audit.length === 0 && <p className="hint">No audit entries yet. All access events are recorded immutably on-chain.</p>}
             {audit.map((a) => (
               <div className="data-row" key={a.entryID}>
-                <span className="k">{a.eventType} — {a.actorID} {a.queuedOffline ? '(synced from offline)' : ''}</span>
+                <span className="k">{a.eventType} — {actorName(a, { selfDID: patientDID })} {a.queuedOffline ? '(synced from offline)' : ''}</span>
                 <span className="v">{new Date(a.timestamp).toLocaleString()}</span>
               </div>
             ))}

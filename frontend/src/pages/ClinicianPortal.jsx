@@ -7,6 +7,7 @@ import { useLedgerEvents } from '../ledgerEvents';
 import './viewRecords.css';
 import '../components/emergencyCode.css';
 import { useScreenCaptureSubject } from '../components/screenCaptureAudit';
+import { PRIVACY_CLOSE } from '../components/PrivacyGuard';
 import { ClinicianOverview } from './ClinicianOverview';
 
 // Record-type categories a clinician can ask for (Table 3.6). The grant
@@ -213,7 +214,7 @@ const EMPTY_REP = { name: '', relationship: '', phone: '' };
 /**
  * Emergency (break-glass) access to another hospital's records, when the
  * patient cannot consent. Uses the patient's number AT that hospital (e.g.
- * from family). One hour, emergency record types only, extendable with a
+ * from family). One hour, all record types, extendable with a
  * reason up to 24 hours; seen by both hospitals' admins and the patient.
  */
 function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
@@ -279,8 +280,8 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
       <div className="dash-welcome emergency">
         <h2>Emergency access</h2>
         <p>
-          For a patient who cannot consent, when their history at another hospital is needed now. You will see their
-          allergies, medications, diagnoses, encounters and lab results from that hospital for <strong>1 hour</strong>
+          For a patient who cannot consent, when their history at another hospital is needed now. You will see
+          <strong> all their records</strong> from that hospital for <strong>1 hour</strong>
           (extendable with a reason, up to 24 hours). Both hospitals’ administrators and the patient will see this access and its reason.
         </p>
       </div>
@@ -390,7 +391,36 @@ function EmergencyAccess({ hospitalID, hospitalName, hospitals, nameOf }) {
   );
 }
 
-const STATUS_ORDER = { ACTIVE: 0, PENDING: 1, EXPIRED: 2, REVOKED: 3 };
+// Where a grant stands now, for the history list. The ledger keeps a grant
+// ACTIVE until something updates it, so a passed expiry time counts as
+// expired here (the ledger refuses it anyway when opened).
+function grantState(g, now = Date.now()) {
+  if (g.status === 'PENDING') return { key: 'pending', label: 'Awaiting patient', order: 1 };
+  if (g.status === 'REVOKED') {
+    return g.grantedAt
+      ? { key: 'ended', label: g.grantType === 'BREAK_GLASS' ? 'Ended' : 'Ended by patient', order: 3 }
+      : { key: 'declined', label: 'Declined by patient', order: 4 };
+  }
+  if (g.status === 'EXPIRED' || (g.status === 'ACTIVE' && g.expiresAt && new Date(g.expiresAt).getTime() <= now)) {
+    return { key: 'expired', label: 'Expired', order: 2 };
+  }
+  if (g.status === 'ACTIVE') return { key: 'active', label: 'Active', order: 0 };
+  return { key: String(g.status || '').toLowerCase(), label: g.status, order: 5 };
+}
+
+const HISTORY_TABS = [
+  ['current', 'Current', (st) => st.key === 'active' || st.key === 'pending'],
+  ['active', 'Active', (st) => st.key === 'active'],
+  ['pending', 'Awaiting patient', (st) => st.key === 'pending'],
+  ['expired', 'Expired', (st) => st.key === 'expired'],
+  ['ended', 'Ended / declined', (st) => st.key === 'ended' || st.key === 'declined' || st.key === 'extended'],
+  ['emergency', 'Emergency', (st, g) => g.grantType === 'BREAK_GLASS'],
+  ['all', 'All history', () => true],
+];
+
+function when(ts) {
+  return ts ? new Date(ts).toLocaleString('en-NG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+}
 
 // How each FHIR type is shown in the record viewer.
 const TYPE_META = {
@@ -442,6 +472,8 @@ function MyGrants({ hospitalName }) {
   const [extendMinutes, setExtendMinutes] = useState(60);
   const [extendError, setExtendError] = useState(null);
   const [details, setDetails] = useState({}); // grantID -> emergency details
+  const [openings, setOpenings] = useState({}); // grantID -> { count, last }
+  const [now, setNow] = useState(Date.now());
 
   async function extend(g) {
     setExtendError(null);
@@ -463,7 +495,35 @@ function MyGrants({ hospitalName }) {
     } catch (e) {
       setError(e.message);
     }
+    // How often each grant's records were opened (from your ledger audit trail).
+    api.getMyActivity(500).then((entries) => {
+      const o = {};
+      for (const e of entries || []) {
+        if (e.eventType !== 'RECORD_ACCESSED') continue;
+        const m = /via grant (\S+?)(;|$|\s)/.exec(e.detail || '');
+        if (!m) continue;
+        const x = (o[m[1]] = o[m[1]] || { count: 0, last: null });
+        x.count += 1;
+        if (!x.last || new Date(e.timestamp) > new Date(x.last)) x.last = e.timestamp;
+      }
+      setOpenings(o);
+    }).catch(() => {});
+    setNow(Date.now());
   }
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  // Leaving the screen, or the privacy lock, closes open records and drops
+  // them from memory; opening again re-checks access and is logged.
+  useEffect(() => {
+    const close = () => {
+      setOpenID(null);
+      setResults({});
+    };
+    window.addEventListener(PRIVACY_CLOSE, close);
+    return () => window.removeEventListener(PRIVACY_CLOSE, close);
+  }, []);
   useEffect(() => {
     load();
     api.searchHospitals('').then(setHospitals).catch(() => {});
@@ -484,7 +544,7 @@ function MyGrants({ hospitalName }) {
     try {
       const res = await api.resolveRecord(g.grantID, g.hospitalID, {
         purpose: g.purpose,
-        resourceTypes: g.scope?.length ? g.scope.join(',') : undefined,
+        resourceTypes: g.grantType !== 'BREAK_GLASS' && g.scope?.length ? g.scope.join(',') : undefined,
       });
       setResults((o) => ({ ...o, [g.grantID]: res }));
     } catch (e) {
@@ -506,13 +566,27 @@ function MyGrants({ hospitalName }) {
     }
   }
 
+  // An approval the patient extended stays on the ledger until it ends;
+  // the newer approval for the same patient and hospital is the one to open.
+  const newestActive = {};
+  for (const g of grants || []) {
+    if (grantState(g, now).key !== 'active') continue;
+    const k = `${g.patientDID}|${g.hospitalID}`;
+    if (!newestActive[k] || new Date(g.expiresAt) > new Date(newestActive[k].expiresAt)) newestActive[k] = g;
+  }
+  const stateOf = (g) => {
+    const st = grantState(g, now);
+    const top = newestActive[`${g.patientDID}|${g.hospitalID}`];
+    return st.key === 'active' && top && top.grantID !== g.grantID ? { key: 'extended', label: 'Extended by patient', order: 2 } : st;
+  };
   const sorted = (grants || [])
-    .slice()
-    .sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) || new Date(b.requestedAt) - new Date(a.requestedAt));
+    .map((g) => ({ g, st: stateOf(g) }))
+    .sort((a, b) => a.st.order - b.st.order || new Date(b.g.requestedAt) - new Date(a.g.requestedAt));
+  const tab = HISTORY_TABS.find(([k]) => k === filter) || HISTORY_TABS[0];
   const shown = sorted
-    .filter((g) => filter === 'all' || g.status === 'ACTIVE' || g.status === 'PENDING')
-    .filter((g) => !q || [g.patientName, g.hospitalNumber, nameOf(g.hospitalID)].some((v) => v && v.toLowerCase().includes(q.toLowerCase())));
-  const counts = { active: sorted.filter((g) => g.status === 'ACTIVE').length, pending: sorted.filter((g) => g.status === 'PENDING').length };
+    .filter(({ g, st }) => tab[2](st, g))
+    .filter(({ g }) => !q || [g.patientName, g.hospitalNumber, g.localNumber, nameOf(g.hospitalID)].some((v) => v && v.toLowerCase().includes(q.toLowerCase())))
+    .map(({ g, st }) => Object.assign(g, { _st: st }));
 
   return (
     <div className="vr">
@@ -524,12 +598,11 @@ function MyGrants({ hospitalName }) {
 
       <div className="vr-toolbar">
         <div className="vr-tabs">
-          <button className={filter === 'current' ? 'active' : ''} onClick={() => setFilter('current')}>
-            Current <span>{counts.active + counts.pending}</span>
-          </button>
-          <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>
-            All <span>{sorted.length}</span>
-          </button>
+          {HISTORY_TABS.map(([k, label, test]) => (
+            <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>
+              {label} <span>{sorted.filter(({ g, st }) => test(st, g)).length}</span>
+            </button>
+          ))}
         </div>
         <input className="vr-search" placeholder="Search patient, hospital number or hospital…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
@@ -538,7 +611,7 @@ function MyGrants({ hospitalName }) {
       {grants && shown.length === 0 && (
         <div className="vr-empty">
           <div className="vr-empty-icon">{'\u{1F4C2}'}</div>
-          <strong>No {filter === 'current' ? 'current ' : ''}grants</strong>
+          <strong>Nothing under “{tab[1]}”</strong>
           <p>Find a patient under <strong>Request Access</strong> and send a request. It appears here once the patient responds.</p>
         </div>
       )}
@@ -552,9 +625,11 @@ function MyGrants({ hospitalName }) {
           const tf = typeFilter[g.grantID] || '';
           const visible = tf ? entries.filter((e) => e.r.resourceType === tf) : entries;
           visible.sort((a, b) => new Date(recordDate(b.r, b.bundle)) - new Date(recordDate(a.r, a.bundle)));
-          const canOpen = g.status === 'ACTIVE';
+          const st = g._st;
+          const canOpen = st.key === 'active';
+          const opened = openings[g.grantID];
           return (
-            <div key={g.grantID} className={`vr-card ${isOpen ? 'open' : ''} status-${g.status.toLowerCase()}`}>
+            <div key={g.grantID} className={`vr-card ${isOpen ? 'open' : ''} status-${st.key}`}>
               <div className="vr-card-head" onClick={() => canOpen && toggle(g)} role={canOpen ? 'button' : undefined}>
                 <div className={`vr-avatar ${g.grantType === 'BREAK_GLASS' ? 'emergency' : ''}`}>{initials(g.patientName)}</div>
                 <div className="vr-main">
@@ -570,18 +645,27 @@ function MyGrants({ hospitalName }) {
                     {g.providerRole && <span>as {g.providerRole}</span>}
                   </div>
                   <div className="vr-scope">
-                    {(g.scope?.length ? g.scope : ['All record types']).map((t) => (
+                    {(g.grantType !== 'BREAK_GLASS' && g.scope?.length ? g.scope : ['All record types']).map((t) => (
                       <span key={t} className="vr-chip">{TYPE_META[t]?.label || t}</span>
                     ))}
                   </div>
+                  <div className="vr-history">
+                    <span>Requested {when(g.requestedAt)}</span>
+                    {g.grantedAt && <span>{g.grantType === 'BREAK_GLASS' ? 'Opened' : 'Approved'} {when(g.grantedAt)}</span>}
+                    {g.expiresAt && st.key !== 'ended' && <span>{st.key === 'expired' ? 'Expired' : 'Expires'} {when(g.expiresAt)}</span>}
+                    {g.revokedAt && <span>{st.key === 'declined' ? 'Declined' : 'Ended'} {when(g.revokedAt)}</span>}
+                    <span>{opened ? `Viewed ${opened.count}× · last ${when(opened.last)}` : 'Not viewed yet'}</span>
+                    {g.grantType === 'BREAK_GLASS' && <span>{g.reviewed ? `Reviewed${g.reviewedAt ? ` ${when(g.reviewedAt)}` : ''}${g.reviewedByName ? ` by ${g.reviewedByName}` : ''}` : 'Awaiting hospital review'}</span>}
+                    {g.patientSigned && <span>Signed by the patient ✓</span>}
+                  </div>
                 </div>
                 <div className="vr-side">
-                  <span className={`vr-status ${g.status.toLowerCase()}`}>{g.status}</span>
+                  <span className={`vr-status ${st.key}`}>{st.label}</span>
                   <span className="vr-when">
-                    {g.status === 'ACTIVE' && timeLeft(g.expiresAt)}
-                    {g.status === 'PENDING' && 'Awaiting patient'}
-                    {g.status === 'REVOKED' && 'Revoked by patient'}
-                    {g.status === 'EXPIRED' && 'Expired'}
+                    {st.key === 'active' && timeLeft(g.expiresAt)}
+                    {st.key === 'expired' && 'Ask the patient again to view'}
+                    {st.key === 'extended' && 'See the newer approval'}
+                    {(st.key === 'ended' || st.key === 'declined') && 'No access'}
                   </span>
                   {canOpen && (
                     <button
@@ -599,7 +683,7 @@ function MyGrants({ hospitalName }) {
 
               {isOpen && (
                 <div className="vr-body">
-                  {busy === g.grantID && !res && <p className="hint">Checking your access on the blockchain…</p>}
+                  {busy === g.grantID && !res && <p className="hint">Checking your access on the blockchain and reading the records from the hospital’s system… this can take up to a minute.</p>}
                   {res && res.error && <div className="error-banner">{res.error}</div>}
                   {g.grantType === 'BREAK_GLASS' && (
                     <div className="vr-emergency">
@@ -653,8 +737,12 @@ function MyGrants({ hospitalName }) {
                       </div>
                       <div className="vr-notes">
                         {res.liveSource && (res.liveSource.ok
-                          ? <span className="vr-note live">{'⚡'} Fetched live from {nameOf(g.hospitalID)}’s FHIR server</span>
-                          : <span className="vr-note warn">Live FHIR fetch failed: {res.liveSource.error}</span>)}
+                          ? <span className="vr-note live">{'⚡'} Read live from {nameOf(g.hospitalID)}’s {res.liveSource.kind === 'emr' ? 'system' : 'FHIR server'}; not stored in Cevruni</span>
+                          : <span className="vr-note warn">
+                              {res.liveSource.kind === 'emr'
+                                ? `Could not read some or all records from ${nameOf(g.hospitalID)}’s system: ${res.liveSource.error}`
+                                : `Live FHIR fetch failed: ${res.liveSource.error}`}
+                            </span>)}
                         {res.withheld > 0 && <span className="vr-note">{'\u{1F512}'} {res.withheld} record{res.withheld === 1 ? '' : 's'} outside this grant’s record types withheld</span>}
                         <span className="vr-note">{'✓'} Access verified on the blockchain and logged</span>
                       </div>
@@ -676,14 +764,44 @@ function MyGrants({ hospitalName }) {
                                   <span className="vr-record-date">{date ? new Date(date).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</span>
                                 </div>
                                 <div className="vr-record-type">{TYPE_META[r.resourceType]?.label || r.resourceType}{r.status ? ` · ${r.status}` : ''}</div>
+                                {r.specimen?.[0]?.display && <div className="vr-text"><strong>Specimen:</strong> {r.specimen[0].display}</div>}
                                 {r.valueString && <div className="vr-value">{r.valueString}</div>}
                                 {r.conclusion && <div className="vr-text">{r.conclusion}</div>}
                                 {r.dosageInstruction?.[0]?.text && <div className="vr-text">Dosage: {r.dosageInstruction[0].text}</div>}
+                                {r.note?.[0]?.text && <div className="vr-text">{r.note[0].text}</div>}
                                 {r.reaction?.[0] && <div className="vr-text vr-allergy">Reaction: {r.reaction[0].manifestation?.map((m) => m.text).join(', ')}{r.reaction[0].severity ? ` (${r.reaction[0].severity})` : ''}</div>}
                                 {r.content?.[0]?.attachment?.data && r.content[0].attachment.contentType === 'text/plain' && (
                                   <div className="vr-text vr-doc">{decodeText(r.content[0].attachment.data)}</div>
                                 )}
                                 {who && <div className="vr-who">{who}</div>}
+                                {r.result?.rows?.length > 0 && (
+                                  <table className="vr-result">
+                                    <thead><tr><th>Test</th><th>Result</th><th>Unit</th><th>Normal range</th><th>Flag</th></tr></thead>
+                                    <tbody>
+                                      {r.result.rows.map((x, k) => (
+                                        <tr key={k} className={x.flag && /(high|low|abnormal|critical|positive|h|l)$/i.test(x.flag) ? 'flagged' : ''}>
+                                          <td data-label="Test">{x.name}</td>
+                                          <td data-label="Result"><strong>{x.value}</strong></td>
+                                          <td data-label="Unit">{x.unit || ''}</td>
+                                          <td data-label="Normal range">{x.range || ''}</td>
+                                          <td data-label="Flag">{x.flag || ''}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                                {r.result?.details?.length > 0 && (
+                                  <details className="vr-all" open={!r.result.rows?.length}>
+                                    <summary>Full result from the hospital</summary>
+                                    <dl>{r.result.details.map((d, k) => <div key={k}><dt>{d.label}</dt><dd>{d.value}</dd></div>)}</dl>
+                                  </details>
+                                )}
+                                {r.details?.length > 0 && (
+                                  <details className="vr-all">
+                                    <summary>Show all details</summary>
+                                    <dl>{r.details.map((d, k) => <div key={k}><dt>{d.label}</dt><dd>{d.value}</dd></div>)}</dl>
+                                  </details>
+                                )}
                               </div>
                             </div>
                           );
